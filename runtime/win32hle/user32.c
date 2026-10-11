@@ -315,6 +315,31 @@ static void item_free(win_t *x) {
     x->items = NULL, x->nitems = x->citems = 0;
 }
 
+/* ---- hooks ----
+ * MFC installs a WH_CBT hook and subclasses each window as it is created
+ * (HCBT_CREATEWND, before WM_NCCREATE); that is how CWnd attaches to an HWND.
+ * One hook per type; CallNextHookEx has nothing to chain to in this model. */
+#define HOOK_BASE 0x484B0000u                            /* 'HK' */
+static uint32_t g_hook[16];                              /* indexed by idHook + 1 (WH_MSGFILTER is -1) */
+static void u_SetWindowsHookExA(void) {                  /* (idHook, lpfn, hMod, dwThreadId) */
+    int id = (int)A32(0);
+    if (id >= -1 && id < 15) { g_hook[id + 1] = A32(1); RET(HOOK_BASE + (uint32_t)(id + 1), 4); }
+    RET(0, 4);
+}
+static void u_UnhookWindowsHookEx(void) {
+    uint32_t h = A32(0), i = h - HOOK_BASE;
+    if (h >= HOOK_BASE && i < 16) g_hook[i] = 0;
+    RET(1, 1);
+}
+static void u_CallNextHookEx(void) { RET(0, 4); }        /* no next hook: default processing */
+/* Fire WH_CBT; nonzero return prevents the action. */
+static uint32_t cbt_hook(uint32_t code, uint32_t wParam, uint32_t lParam) {
+    uint32_t fn = g_hook[5 + 1];                         /* WH_CBT = 5 */
+    if (!fn) return 0;
+    uint32_t a[3] = { code, wParam, lParam };
+    return hle_call_guest(fn, 3, a);
+}
+
 uint32_t hle_create_window(uint32_t exstyle, const char *cls, const char *title, uint32_t style, int px, int py, int pw, int ph,
                            uint32_t parent, uint32_t menu, uint32_t hinst, uint32_t param) {
     int c = find_class(cls);
@@ -340,6 +365,9 @@ uint32_t hle_create_window(uint32_t exstyle, const char *cls, const char *title,
     uint32_t cs[12] = { param, hinst, menu, parent, (uint32_t)ph, (uint32_t)pw, (uint32_t)py, (uint32_t)px, style,
                         (uint32_t)(uintptr_t)title, (uint32_t)(uintptr_t)cls, exstyle };
     uint32_t h = x->hwnd;
+    uint32_t cbtcw[2] = { (uint32_t)(uintptr_t)cs, 0 };  /* CBT_CREATEWND { lpcs, hwndInsertAfter } */
+    if (cbt_hook(3 /*HCBT_CREATEWND*/, h, (uint32_t)(uintptr_t)cbtcw)) { x->used = 0; return 0; }
+    if (!(x = W(h))) return 0;                            /* the hook may subclass via SetWindowLong(GWL_WNDPROC) */
     hle_send(h, WM_NCCREATE, 0, (uint32_t)(uintptr_t)cs);
     if ((int32_t)hle_send(h, WM_CREATE, 0, (uint32_t)(uintptr_t)cs) == -1) {
         x = W(h);
@@ -1998,6 +2026,8 @@ static void u_SetMessageQueue(void) { RET(1, 1); }       /* obsolete since Win32
 const win32hle_shim win32hle_user32[] = {
     { "RegisterWindowMessageA", u_RegisterWindowMessageA },
     { "SetMessageQueue", u_SetMessageQueue },
+    { "SetWindowsHookExA", u_SetWindowsHookExA }, { "SetWindowsHookExW", u_SetWindowsHookExA },
+    { "UnhookWindowsHookEx", u_UnhookWindowsHookEx }, { "CallNextHookEx", u_CallNextHookEx },
     { "CopyRect", u_CopyRect }, { "SetRectEmpty", u_SetRectEmpty }, { "SetRect", u_SetRect },
     { "OffsetRect", u_OffsetRect }, { "InflateRect", u_InflateRect }, { "PtInRect", u_PtInRect },
     { "IsRectEmpty", u_IsRectEmpty }, { "IntersectRect", u_IntersectRect }, { "UnionRect", u_UnionRect },

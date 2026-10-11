@@ -6,6 +6,20 @@ versions follow [SemVer](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- win32hle: more of the MFC/GDI surface, driven by SimCity 2000 on Linux
+  (its CRT, MFC startup, registration check, 256-colour video warning, and data
+  loading now run). user32: the WH_CBT hook (`SetWindowsHookExA`/`CallNextHookEx`/
+  `UnhookWindowsHookEx`), fired with `HCBT_CREATEWND` before `WM_NCCREATE`, so
+  MFC subclasses each window as it is created — how `CWnd` attaches to an `HWND`;
+  plus `RegisterWindowMessageA` and `SetMessageQueue`. module: an EXE's own
+  resources are now found — the main image is registered before it is mapped, so
+  its resource directory (`DataDirectory[2]`) is read lazily on first lookup;
+  without this MFC's strings/dialogs were empty and it aborted. kernel32:
+  `GetFullPathNameA` (lexical) and the Win16 `_lopen`/`_lcreat`/`_lread`/
+  `_lwrite`/`_lclose`/`_llseek` file family on the host descriptor table.
+  advapi32: `HLE_REGTRACE` logs registry access during bring-up.
+
+### Added
 - win32hle gdidc: a GDI object model and drawing, for the MFC/GDI titles the
   DirectDraw path never exercised. Brushes (`CreateSolidBrush`/`CreateHatchBrush`/
   `CreateBrushIndirect`), pens (`CreatePen`/`CreatePenIndirect`), bitmaps
