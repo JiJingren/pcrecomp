@@ -1405,8 +1405,24 @@ class Lifter:
         The callee returns to C. Whatever of the hand-built frame it left on
         the stack (the label and CS, when its ret stopped at the trampoline)
         is what the trampoline's retf would have popped, so pop that, then
-        continue at the label."""
+        continue at the label.
+
+        The jump can also be a `retf` with the target pushed last: `push cs /
+        push label / push 0 / push seg / push off / retf`, for a target only
+        known at run time. The retf pops the target, so the call dispatches to
+        it, and `extra` counts only the pushes between the label and the
+        target's two words."""
         op1 = inst.op1
+        if inst.mnemonic == 'retf' and op1 is None:
+            self._emit(f'{{ uint16_t _o = pop16(cpu); uint16_t _s = pop16(cpu); '
+                       f'uint16_t _fr = (uint16_t)(cpu->sp + {extra}); recomp_dispatch(cpu, _s, _o);',
+                       f'retf (a call to the pushed target; returns to 0x{label:04X})')
+            self._emit('  if (cpu->sp == _fr) cpu->sp += 4; }', 'the trampoline retf')
+            if label in self.valid_addrs:
+                self._emit(f'goto {_label(label, self.func_name)};')
+            else:
+                self._emit(self._tail_jump(func_start + label))
+            return
         frame = 2 if inst.mnemonic == 'jmp' and op1.type in (OpType.REL8, OpType.REL16) else 4
         if op1.type == OpType.FAR:
             far_base = getattr(self, 'far_base', None) or 0
