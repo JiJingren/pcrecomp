@@ -6,6 +6,16 @@ versions follow [SemVer](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- win32hle gdidc: the GDI palette cluster — `CreatePalette`/`GetPaletteEntries`/
+  `SetPaletteEntries`/`AnimatePalette`/`GetNearestPaletteIndex`/`SelectPalette`/
+  `RealizePalette`/`ResizePalette`/`GetSystemPaletteEntries`/`SetSystemPaletteUse`
+  (a palette is up to 256 COLORREFs; a DC carries a selected palette, so an 8bpp
+  DIB can blit through it). user32: the MDI default procs `DefFrameProcA` /
+  `DefMDIChildProcA`. With these SimCity 2000 runs its whole MFC startup on
+  Linux — registration, the palette setup, its MDI main frame — into building
+  its menu bar.
+
+### Added
 - win32hle: more of the MFC/GDI surface, driven by SimCity 2000 on Linux
   (its CRT, MFC startup, registration check, 256-colour video warning, and data
   loading now run). user32: the WH_CBT hook (`SetWindowsHookExA`/`CallNextHookEx`/

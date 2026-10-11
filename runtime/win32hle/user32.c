@@ -703,6 +703,11 @@ static uint32_t def_proc(uint32_t h, uint32_t m, uint32_t w, uint32_t l) {
 }
 static void p_DefWindowProc(void) { RET(def_proc(A32(0), A32(1), A32(2), A32(3)), 4); }
 static void u_DefWindowProcA(void) { RET(def_proc(A32(0), A32(1), A32(2), A32(3)), 4); }
+/* MDI default procs. DefFrameProc(hwndFrame, hwndMDIClient, msg, w, l); the
+ * MDI-specific routing (activating/sizing children) is the MDI client's; the
+ * frame's own default handling is DefWindowProc. DefMDIChildProc is 4-arg. */
+static void u_DefFrameProcA(void)    { RET(def_proc(A32(0), A32(2), A32(3), A32(4)), 5); }
+static void u_DefMDIChildProcA(void) { RET(def_proc(A32(0), A32(1), A32(2), A32(3)), 4); }
 
 /* ---- the standard controls ---- */
 static void owner_draw(win_t *x, uint32_t type, int item, uint32_t state, int l, int t, int r, int b) {
@@ -2059,6 +2064,7 @@ const win32hle_shim win32hle_user32[] = {
     { "RegisterClassA", u_RegisterClassA }, { "RegisterClassExA", u_RegisterClassExA },
     { "GetClassInfoA", u_GetClassInfoA }, { "GetClassNameA", u_GetClassNameA },
     { "CreateWindowExA", u_CreateWindowExA }, { "DefWindowProcA", u_DefWindowProcA },
+    { "DefFrameProcA", u_DefFrameProcA }, { "DefMDIChildProcA", u_DefMDIChildProcA },
     { "CallWindowProcA", u_CallWindowProcA }, { "ShowWindow", u_ShowWindow },
     { "CloseWindow", u_CloseWindow }, { "DestroyWindow", u_DestroyWindow },
     { "SetWindowTextA", u_SetWindowTextA }, { "GetWindowTextA", u_GetWindowTextA },

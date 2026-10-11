@@ -29,7 +29,7 @@
 typedef struct {
     int used;
     uint8_t *px; int w, h, pitch, bpp;
-    uint32_t font, text, bk, brush, pen;
+    uint32_t font, text, bk, brush, pen, pal;
     int bkmode, align, wox, woy, vox, voy, cpx, cpy;
 } dc_t;
 #define MAX_DC 64
@@ -141,13 +141,14 @@ static void g_CreateFontIndirectA(void) {                /* LOGFONTA: height, wi
 /* ---- GDI objects: brushes, pens, bitmaps ----
  * One handle space (0x0DB1....). A brush/pen carry a COLORREF; a bitmap carries
  * its own pixels so it can be selected into a memory DC and blitted. */
-enum { GO_BRUSH = 1, GO_PEN, GO_BITMAP };
+enum { GO_BRUSH = 1, GO_PEN, GO_BITMAP, GO_PALETTE };
 #define PS_NULL 5
 #define HS_HOLLOW 5
 typedef struct {
     int used, type;
     uint32_t color; int style, width;
     uint8_t *px; int w, h, pitch, bpp, owns;             /* bitmap */
+    uint32_t *pal; int paln;                             /* palette: paln COLORREFs */
 } gobj_t;
 #define MAX_GOBJ 1024
 static gobj_t g_obj[MAX_GOBJ];
@@ -197,6 +198,59 @@ static void g_CreatePen(void)           { RET(make_pen((int)A32(0), (int)A32(1),
 static void g_CreateBrushIndirect(void) { uint32_t lb = A32(0); RET(make_brush(lb ? MEM32(lb + 4) : 0, lb && MEM32(lb) == 1 ? HS_HOLLOW : 0), 1); } /* LOGBRUSH: style, color */
 static void g_CreatePenIndirect(void)   { uint32_t lp = A32(0); RET(make_pen(lp ? (int)MEM32(lp) : 0, lp ? (int)MEM32(lp + 4) : 1, lp ? MEM32(lp + 8) : 0), 1); }
 
+/* ---- palettes ----
+ * A palette is up to 256 COLORREFs. SimCity 2000 builds one from its master
+ * palette bitmap and animates it; with a 32bpp device we don't drive real
+ * hardware, but an 8bpp DIB blits through the DC's selected palette (see the
+ * blit path), and AnimatePalette changing an entry recolours the next blit. */
+static void g_CreatePalette(void) {                      /* LOGPALETTE: version, count, PALETTEENTRY[] */
+    uint32_t lp = A32(0);
+    int n = lp ? (int)MEM16(lp + 2) : 0;
+    if (n > 256) n = 256;
+    if (n < 0) n = 0;
+    uint32_t h = new_obj(GO_PALETTE); gobj_t *o = GOBJ(h);
+    if (o) {
+        o->pal = (uint32_t *)calloc(256, 4); o->paln = n;
+        for (int i = 0; i < n; i++) { uint32_t e = lp + 4 + 4u * (uint32_t)i; o->pal[i] = MEM8(e) | (MEM8(e + 1) << 8) | (MEM8(e + 2) << 16); }
+    }
+    RET(h, 1);
+}
+static void g_GetPaletteEntries(void) {                  /* (hpal, start, count, lpentries) */
+    gobj_t *o = GOBJ(A32(0)); uint32_t start = A32(1), count = A32(2), lp = A32(3), got = 0;
+    if (!o || !o->pal) RET(0, 4);
+    for (uint32_t i = 0; i < count && start + i < 256; i++, got++) {
+        uint32_t c = o->pal[start + i];
+        if (lp) { MEM8(lp + 4 * i) = c & 0xFF; MEM8(lp + 4 * i + 1) = (c >> 8) & 0xFF; MEM8(lp + 4 * i + 2) = (c >> 16) & 0xFF; MEM8(lp + 4 * i + 3) = 0; }
+    }
+    RET(got, 4);
+}
+static void g_SetPaletteEntries(void) {                  /* (hpal, start, count, lpentries) */
+    gobj_t *o = GOBJ(A32(0)); uint32_t start = A32(1), count = A32(2), lp = A32(3), set = 0;
+    if (!o || !o->pal) RET(0, 4);
+    for (uint32_t i = 0; i < count && start + i < 256; i++, set++)
+        if (lp) o->pal[start + i] = MEM8(lp + 4 * i) | (MEM8(lp + 4 * i + 1) << 8) | (MEM8(lp + 4 * i + 2) << 16);
+    if ((int)(start + count) > o->paln) o->paln = (start + count) > 256 ? 256 : (int)(start + count);
+    RET(set, 4);
+}
+static void g_AnimatePalette(void) { g_SetPaletteEntries(); }    /* same store; the next blit recolours */
+static void g_GetNearestPaletteIndex(void) {             /* (hpal, color) */
+    gobj_t *o = GOBJ(A32(0)); uint32_t c = A32(1); int best = 0; long bd = -1;
+    int r = c & 0xFF, g = (c >> 8) & 0xFF, b = (c >> 16) & 0xFF;
+    if (o && o->pal) for (int i = 0; i < o->paln; i++) {
+        uint32_t p = o->pal[i]; int dr = r - (int)(p & 0xFF), dg = g - (int)((p >> 8) & 0xFF), db = b - (int)((p >> 16) & 0xFF);
+        long d = (long)dr * dr + dg * dg + db * db;
+        if (bd < 0 || d < bd) bd = d, best = i;
+    }
+    RET((uint32_t)best, 2);
+}
+static void g_SelectPalette(void) { dc_t *d = DC(A32(0)); uint32_t old = d ? d->pal : 0; if (d) d->pal = A32(1); RET(old, 3); }
+static void g_RealizePalette(void) { dc_t *d = DC(A32(0)); gobj_t *o = d ? GOBJ(d->pal) : NULL; RET(o ? (uint32_t)o->paln : 0u, 1); }
+static void g_ResizePalette(void) { gobj_t *o = GOBJ(A32(0)); if (o) o->paln = (int)A32(1) > 256 ? 256 : (int)A32(1); RET(1, 2); }
+static void g_GetSystemPaletteEntries(void) { RET(0, 4); }       /* truecolour device: no system palette */
+static void g_SetSystemPaletteUse(void) { RET(1, 2); }           /* SYSPAL_STATIC */
+static void g_GetSystemPaletteUse(void) { RET(1, 1); }
+static void g_UpdateColors(void) { RET(1, 1); }
+
 /* ---- objects ---- */
 int hle_gdi_dib_delete(uint32_t h);                      /* gdi32.c */
 static void g_DeleteObject(void) {
@@ -208,7 +262,7 @@ static void g_DeleteObject(void) {
         RET(1, 1);
     }
     gobj_t *o = GOBJ(h);
-    if (o) { if (o->owns) free(o->px); o->used = 0; RET(1, 1); }
+    if (o) { if (o->owns) free(o->px); free(o->pal); o->used = 0; RET(1, 1); }
     RET(hle_gdi_dib_delete(h) || 1, 1);
 }
 static void g_GetStockObject(void) { RET(stock((int)A32(0)), 1); }
@@ -468,6 +522,12 @@ const win32hle_shim win32hle_gdidc[] = {
     { "CreateBrushIndirect", g_CreateBrushIndirect }, { "CreatePen", g_CreatePen }, { "CreatePenIndirect", g_CreatePenIndirect },
     { "CreateCompatibleBitmap", g_CreateCompatibleBitmap }, { "CreateBitmap", g_CreateBitmap },
     { "CreateCompatibleDC", g_CreateCompatibleDC }, { "DeleteDC", g_DeleteDC },
+    { "CreatePalette", g_CreatePalette }, { "GetPaletteEntries", g_GetPaletteEntries },
+    { "SetPaletteEntries", g_SetPaletteEntries }, { "AnimatePalette", g_AnimatePalette },
+    { "GetNearestPaletteIndex", g_GetNearestPaletteIndex }, { "SelectPalette", g_SelectPalette },
+    { "RealizePalette", g_RealizePalette }, { "ResizePalette", g_ResizePalette },
+    { "GetSystemPaletteEntries", g_GetSystemPaletteEntries }, { "SetSystemPaletteUse", g_SetSystemPaletteUse },
+    { "GetSystemPaletteUse", g_GetSystemPaletteUse }, { "UpdateColors", g_UpdateColors },
     { "FillRect", g_FillRect }, { "FrameRect", g_FrameRect }, { "Rectangle", g_Rectangle }, { "PatBlt", g_PatBlt },
     { "SetPixel", g_SetPixel }, { "SetPixelV", g_SetPixel }, { "GetPixel", g_GetPixel },
     { "MoveToEx", g_MoveToEx }, { "LineTo", g_LineTo }, { "BitBlt", g_BitBlt }, { "StretchBlt", g_StretchBlt },
