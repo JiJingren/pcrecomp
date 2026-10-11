@@ -156,6 +156,9 @@ versions follow [SemVer](https://semver.org/).
   runtime gap). `HLE_FILETRACE=1` logs the data files a title opens. (#45)
 
 ### Fixed
+- lift16: `bt`/`bts`/`btr`/`btc` with a register offset into memory address
+  a bit string (the offset is signed and not reduced to the operand width);
+  the word at the operand was tested instead. (#89)
 - lift32: `repz ret` (F3 C3) lifts as a `ret`, and generate.py's extent walk
   ends a body at it. It was UNIMPLEMENTED, so MSVC 2005's
   `__security_check_cookie` fell through into `__report_gsfailure` and every
