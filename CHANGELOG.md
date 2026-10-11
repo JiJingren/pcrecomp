@@ -6,6 +6,21 @@ versions follow [SemVer](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- win32hle user32: a menu model and MDI, driven by SimCity 2000's MFC MDI
+  frame. Menus (`CreateMenu`/`CreatePopupMenu`/`AppendMenuA`/`InsertMenuA`/
+  `ModifyMenuA`/`DeleteMenu`/`GetMenuItemCount`/`GetSubMenu`/`CheckMenuItem`/
+  `EnableMenuItem`/`GetMenuState`/`CheckMenuRadioItem`/…) over a real item tree,
+  and `LoadMenuA` parses the classic MENU resource (UTF-16 item text) into it —
+  not drawn yet, but a program queries and edits them constantly. The MDI client
+  (a built-in `mdiclient` class whose `WM_MDICREATE` opens a child view) and the
+  frame/child default procs `DefFrameProcA`/`DefMDIChildProcA`. `DeferWindowPos`
+  (`Begin`/`Defer`/`End`, applied at once) for a frame's bar/client layout, and
+  `EqualRect`. With these SimCity 2000 runs its whole MFC startup on Linux — its
+  MDI main frame, the document child view, and the window layout — into building
+  its toolbar (next: COMCTL32 `ImageList_*`, then the 8-bit DIB blit + a window
+  surface for visible pixels).
+
+### Added
 - win32hle gdidc: the GDI palette cluster — `CreatePalette`/`GetPaletteEntries`/
   `SetPaletteEntries`/`AnimatePalette`/`GetNearestPaletteIndex`/`SelectPalette`/
   `RealizePalette`/`ResizePalette`/`GetSystemPaletteEntries`/`SetSystemPaletteUse`
