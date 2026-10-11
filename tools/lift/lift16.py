@@ -1391,6 +1391,47 @@ class Lifter:
             return 'cpu->ax = x87_sw();'                          # fnstsw ax
         return f'x87_unhandled("{b.hex()}");'
 
+    def _lift_push_call(self, inst, func_start, label, push_at, extra):
+        """`jmp X` that a `push label` before it turns into a call.
+
+        Assembly that calls a near routine in another segment cannot use a
+        near call, so it builds the frame by hand: `push cs / push label /
+        push 0 / jmp far seg:routine`. The routine's near `ret` pops the 0 and
+        lands on seg:0000, which holds a lone `retf`, and that pops label:cs.
+        (Microsoft Space Simulator's three code segments each start with one.)
+        Without the 0 it is a plain far call to a routine ending in retf; with
+        a near jmp and no `push cs`, a near call.
+
+        The callee returns to C. Whatever of the hand-built frame it left on
+        the stack (the label and CS, when its ret stopped at the trampoline)
+        is what the trampoline's retf would have popped, so pop that, then
+        continue at the label."""
+        op1 = inst.op1
+        frame = 2 if inst.mnemonic == 'jmp' and op1.type in (OpType.REL8, OpType.REL16) else 4
+        if op1.type == OpType.FAR:
+            far_base = getattr(self, 'far_base', None) or 0
+            t = far_base + op1.far_seg * 16 + op1.disp
+            call = (f'{self.known_funcs[t]}(cpu);' if t in self.known_funcs else
+                    f'recomp_dispatch(cpu, 0x{op1.far_seg:X}, 0x{op1.disp:X});')
+        elif op1.type in (OpType.REL8, OpType.REL16):
+            t = func_start + (op1.disp & 0xFFFF)
+            call = (f'{self.known_funcs[t]}(cpu);' if t in self.known_funcs else
+                    f'recomp_dispatch(cpu, 0x{(t >> 4) & 0xFFFF:X}, 0x{t & 0xF:X});')
+        else:
+            self._emit(f'/* UNHANDLED: push-call through {op1!r} */', repr(inst))
+            return
+        if call.endswith('(cpu);'):
+            self.func_calls.add(call[:-6])
+        # Where the frame's top is, counted back from here: every push between
+        # the label's and the jmp is an argument the callee pops.
+        self._emit(f'{{ uint16_t _fr = (uint16_t)(cpu->sp + {extra}); {call}',
+                   f'{inst!r} (call; returns to 0x{label:04X})')
+        self._emit(f'  if (cpu->sp == _fr) cpu->sp += {frame}; }}', 'the trampoline retf')
+        if label in self.valid_addrs:
+            self._emit(f'goto {_label(label, self.func_name)};')
+        else:
+            self._emit(self._tail_jump(func_start + label))
+
     def lift_function(self, name: str, instructions: list, func_start: int,
                       is_far: bool = False, entry_addr=None) -> str:
         """Lift an entire function to C code.
@@ -1433,6 +1474,17 @@ class Lifter:
                     target = inst.op1.disp
                     if target in self.valid_addrs:
                         self.labels_needed.add(target)
+
+        # A call made by hand: `push cs / push label / [push args] / jmp X`,
+        # or `push label / jmp X` for a near one. The driver names each such
+        # jmp in `push_calls` ({jmp address: (label, address of the push of the
+        # label, bytes pushed after it)});
+        # the label is where the callee's return lands, so it is a leader here.
+        push_calls = getattr(self, 'push_calls', {})
+        push_rets = {p for _l, p, _n in push_calls.values()}
+        for _l, _p, _n in push_calls.values():
+            if _l in self.valid_addrs:
+                self.labels_needed.add(_l)
 
         want_entry_goto = entry_addr is not None and entry_addr in self.valid_addrs             and instructions and entry_addr != instructions[0].address
         if want_entry_goto:
@@ -1486,6 +1538,16 @@ class Lifter:
                 self._emit('if (zf(cpu)) break;')
                 self.indent -= 1
                 self._emit('}')
+            elif inst.address in push_rets:
+                # The label goes on the stack as the call's return address. Push
+                # the sentinel instead, as a lifted call does: the C call below
+                # is what returns here, and a real IP would make the callee's
+                # retf dispatch to it from inside the callee.
+                self._emit_label(inst.address)
+                self._emit('push16(cpu, 0xFFFF);', f'{inst.mnemonic} {inst.op1!r} (return label, as a sentinel)')
+            elif inst.address in push_calls:
+                self._emit_label(inst.address)
+                self._lift_push_call(inst, func_start, *push_calls[inst.address])
             else:
                 self.lift_instruction(inst, func_start)
 
