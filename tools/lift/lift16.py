@@ -1116,7 +1116,8 @@ class Lifter:
             cc = 'cc_' + m[3:]
             self._emit(_write(op1, f'({cc}(cpu) ? 1 : 0)'), orig)
 
-        elif m in ('bt', 'bts', 'btr', 'btc') and op1.type in (OpType.MEM, OpType.MOFFS)                 and op2.type in (OpType.REG16, OpType.REG32):
+        elif m in ('bt', 'bts', 'btr', 'btc') and op1.type in (OpType.MEM, OpType.MOFFS) \
+                and op2.type in (OpType.REG16, OpType.REG32):
             # A register bit offset into memory addresses a bit STRING: the
             # offset is signed and not reduced modulo the operand width, so
             # `bt word [x], ax` with ax = 37 tests bit 5 of the word at x+4.
