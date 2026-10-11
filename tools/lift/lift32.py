@@ -2017,10 +2017,18 @@ class Lifter:
                 lines.append(f"if ({reg} == 0) goto L_{t:08X}; {comment}")
 
         elif m in ('loop', 'loope', 'loopne'):
+            # loope/loopne also test ZF (je/jne's condition), never CF. The
+            # condition is taken before ecx counts down, since a flag setter's
+            # captured operands can name ecx. Testing CF ended Streets of
+            # SimCity's texture-span loop (0x004B7CC8, `inc edi; loopne`) on
+            # whatever carry an earlier shr left, and the next span was drawn
+            # from a corrupt destination.
             t = ops[0].imm if ops and ops[0].type == X86_OP_IMM else None
-            extra = {'loop': '', 'loope': ' && _cf == 0', 'loopne': ' && _cf == 0'}[m]
-            if t is not None:
-                lines.append(f"if (--ecx != 0{extra}) goto L_{t:08X}; {comment}")
+            if t is not None and m == 'loop':
+                lines.append(f"if (--ecx != 0) goto L_{t:08X}; {comment}")
+            elif t is not None:
+                cond = self._make_condition('je' if m == 'loope' else 'jne')
+                lines.append(f"{{ int _zc = ({cond}); if (--ecx != 0 && _zc) goto L_{t:08X}; }} {comment}")
 
         elif m == 'scasd':
             lines.append(f"_flag_a = eax; _flag_b = MEM32(edi); _flag_k = FK_CMP; "
