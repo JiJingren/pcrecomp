@@ -6,6 +6,24 @@ versions follow [SemVer](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- win32hle gdidc: a GDI object model and drawing, for the MFC/GDI titles the
+  DirectDraw path never exercised. Brushes (`CreateSolidBrush`/`CreateHatchBrush`/
+  `CreateBrushIndirect`), pens (`CreatePen`/`CreatePenIndirect`), bitmaps
+  (`CreateCompatibleBitmap`/`CreateBitmap`, selectable into a memory DC), and the
+  stock objects (`GetStockObject` now returns real brush/pen objects); plus
+  `FillRect`/`FrameRect`/`Rectangle`/`PatBlt`/`SetPixel`/`GetPixel`/`MoveToEx`/
+  `LineTo` and DC→DC `BitBlt`/`StretchBlt` (like-for-like bpp — a game's own
+  back-buffer-to-window blit). `CreateCompatibleDC`/`DeleteDC` now return real
+  DCs (moved from gdi32.c) so a bitmap selected into a memory DC can be blitted.
+  Surfaced bringing SimCity 2000 up on Linux: it runs its CRT, MFC `AfxWinInit`,
+  window-class registration and GDI object setup, into MFC window creation.
+- win32hle user32: `RegisterWindowMessageA` (name→id interning, 0xC000..; MFC
+  leans on it) and `SetMessageQueue` (obsolete since Win32 → succeeds).
+- win32hle kernel32: global atoms (`GlobalAddAtomA`/`GlobalFindAtomA`/
+  `GlobalDeleteAtom`/`GlobalGetAtomNameA`) — MFC registers its window classes by
+  atom at startup; general to any MFC title.
+
+### Added
 - dos32: save states. `dos32_state_save` / `dos32_state_load` write the whole
   machine to a file and back: registers, the host's tables, the chips, and
   memory with all-zero pages left out (about 8 MB for Theme Park). A state

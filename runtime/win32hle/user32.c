@@ -1980,7 +1980,24 @@ uint32_t hle_first_hwnd(void) {
     return 0;
 }
 
+/* RegisterWindowMessageA: intern a message name to a unique id in the
+ * 0xC000.. range (what Windows gives these). MFC leans on it for its own
+ * internal messages; same name -> same id across the process. */
+static struct { char name[64]; } g_winmsg[256];
+static int g_winmsg_n;
+static void u_RegisterWindowMessageA(void) {
+    const char *s = ASTR(0);
+    if (!s) RET(0, 1);
+    for (int i = 0; i < g_winmsg_n; i++) if (!strcmp(g_winmsg[i].name, s)) RET(0xC000u + (uint32_t)i, 1);
+    if (g_winmsg_n < 256) { snprintf(g_winmsg[g_winmsg_n].name, 64, "%s", s); RET(0xC000u + (uint32_t)g_winmsg_n++, 1); }
+    RET(0xC000u, 1);
+}
+
+static void u_SetMessageQueue(void) { RET(1, 1); }       /* obsolete since Win32; always succeeds */
+
 const win32hle_shim win32hle_user32[] = {
+    { "RegisterWindowMessageA", u_RegisterWindowMessageA },
+    { "SetMessageQueue", u_SetMessageQueue },
     { "CopyRect", u_CopyRect }, { "SetRectEmpty", u_SetRectEmpty }, { "SetRect", u_SetRect },
     { "OffsetRect", u_OffsetRect }, { "InflateRect", u_InflateRect }, { "PtInRect", u_PtInRect },
     { "IsRectEmpty", u_IsRectEmpty }, { "IntersectRect", u_IntersectRect }, { "UnionRect", u_UnionRect },
