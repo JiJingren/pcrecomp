@@ -263,7 +263,8 @@ class Lifter:
     def __init__(self, iat_map: dict = None, func_names: dict = None,
                  lifted: set = None, precise_sbb: bool = False,
                  patch_sites: set = None, precise_carry: bool = False,
-                 reloc=None, dos: bool = False, call_pop: set = None):
+                 reloc=None, dos: bool = False, call_pop: set = None,
+                 computed_ret: bool = False):
         """
         iat_map: VA -> (dll, func_name) for import resolution
         func_names: VA -> name for known function names
@@ -295,6 +296,13 @@ class Lifter:
         # A DOS-extender program (LE, see tools/le/): int, port I/O, cli/sti,
         # hlt and iretd call into the host instead of being dropped.
         self.dos = dos
+        # `ret` to an address the code pushed itself is a jump, not a return.
+        # Hand-written asm dispatches that way (Messiah's movie decoder:
+        # `push loop; push [h2]; jmp [h1]`, and each handler's `ret` goes to
+        # the next). Off by default: it costs a compare on every ret, and it
+        # needs RECOMP_RETADDR to be a value no such push makes. DOS mode
+        # always has it.
+        self.computed_ret = computed_ret
         # Call targets whose first instruction is `pop r32` (see the call case).
         self.call_pop = call_pop or set()
         self._patched_imm = None
@@ -1525,7 +1533,7 @@ class Lifter:
             # any stdcall callee-cleanup bytes (ret N -> esp += 4 + N). Without the
             # +4 the simulated ESP drifts down 4 bytes per call and eventually the
             # 0xDEAD0000 dummy return address gets read as a function argument.
-            if self.dos:
+            if self.dos or self.computed_ret:
                 # `push target; ret` is a computed jump, and Watcom's int386x
                 # makes one into its table of `int N; ret` stubs. A return
                 # address the caller did not push is not ours to pop: it is
