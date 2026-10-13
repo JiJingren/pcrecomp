@@ -129,7 +129,7 @@ FLAG_KIND = {
     'cmp': 'FK_CMP', 'sub': 'FK_CMP', 'dec': 'FK_DEC',
     'add': 'FK_ADD', 'inc': 'FK_INC',
     'and': 'FK_TEST', 'or': 'FK_TEST', 'xor': 'FK_TEST', 'test': 'FK_TEST',
-    'bt': 'FK_BT', 'bts': 'FK_BT', 'btr': 'FK_BT', 'btc': 'FK_BT', 'fcom': 'FK_FCOM',
+    'bt': 'FK_BT', 'bts': 'FK_BT', 'btr': 'FK_BT', 'btc': 'FK_BT',
     'eflags': 'FK_EFLAGS',
 }
 
@@ -738,18 +738,6 @@ class Lifter:
             if cc:
                 return f"/* {setter} result */ recomp_cond(_flag_k, {ops}, {cc})"
             return f"/* {setter}: unmapped {mnem} */ 0"
-        elif setter == 'fcom':
-            # fcom/fcomp + fnstsw + sahf loads C0->CF and C3->ZF, so MSVC tests the
-            # FPU comparison with the UNSIGNED jccs. `ops` is the -1/0/1 result.
-            fpu_cond = {
-                'jb': '<', 'jbe': '<=', 'ja': '>', 'jae': '>=',
-                'jl': '<', 'jle': '<=', 'jg': '>', 'jge': '>=',
-                'je': '==', 'jz': '==', 'jne': '!=', 'jnz': '!=',
-            }
-            op = fpu_cond.get(jcc_mnemonic.replace('set', 'j').replace('cmov', 'j'))
-            if op:
-                return f"({ops} {op} 0)"
-            return f"/* fcom: unmapped {jcc_mnemonic} */ ({ops} != 0)"
         elif setter == 'bt':
             # BT sets CF = bit tested. jb/jc take CF=1, jae/jnc take CF=0 --
             # both used to return BT_CF, which inverted every `bt; jae`: the
@@ -1772,9 +1760,6 @@ class Lifter:
         elif m in ('fcompp', 'fucompp'):
             lines.append(f"_fpu_cmp = FPU_CMP(_st[0], _st[1]); {comment}")
             lines.append(f"fp_pop(); fp_pop();")
-            lines.append("_flag_a = (uint32_t)_fpu_cmp; _flag_b = 0;")
-            self._flag_state = ('fcom', '_fpu_cmp')
-            self._flag_seq += 1
 
         # fcomi and friends compare st(0) with st(i) straight into EFLAGS (ZF PF
         # CF, as comiss does); the x87 condition codes are left alone. Capstone
@@ -1788,6 +1773,14 @@ class Lifter:
             self._flag_state = ('eflags', '_flag_a, _flag_b')
             self._flag_seq += 1
 
+        # fcom, fucom, fcompp, fucompp and ftst write the x87 condition codes
+        # (C0 C2 C3) and nothing else: EFLAGS keep whatever the last integer
+        # instruction left. The program reads the compare through fnstsw (and
+        # sahf, or test ah), both modelled below. These used to set the flag
+        # state as well, so a jcc read the float compare even when MSVC had
+        # scheduled a `test` in front of it: in Bully's camera code,
+        # `test ecx, ecx; fld; fucom st(1); fnstsw ax; fstp st(1); je` jumped
+        # on the floats instead of on ecx, and passed a null pointer on.
         elif m in ('fcom', 'fcomp', 'fucom', 'fucomp'):
             if ops:
                 src = self._fmt_fpu_src(ops)
@@ -1796,9 +1789,6 @@ class Lifter:
                 lines.append(f"_fpu_cmp = FPU_CMP(_st[0], _st[1]); {comment}")
             if m in ('fcomp', 'fucomp'):
                 lines.append(f"fp_pop();")
-            lines.append("_flag_a = (uint32_t)_fpu_cmp; _flag_b = 0;")
-            self._flag_state = ('fcom', '_fpu_cmp')
-            self._flag_seq += 1
 
         elif m == 'fnstsw' or m == 'fstsw':
             # The x87 status word, built from the last compare.
@@ -1812,10 +1802,8 @@ class Lifter:
             # that one binary, every one of them a float comparison branching on
             # a stale register.
             #
-            # The `setter == 'fcom'` path below handles the case where the jcc
-            # follows the compare directly; it cannot help here, because the
-            # intervening `test` legitimately takes over the flag state. The
-            # status word has to be real.
+            # The compares leave EFLAGS alone, so this is the only way their
+            # result reaches a branch. The status word has to be real.
             #
             # C0 is bit 8, C2 bit 10, C3 bit 14. With no NaN modelling only the
             # three ordered outcomes arise:
@@ -1840,9 +1828,8 @@ class Lifter:
                 lines.append(f"MEM16({addr}) = (uint16_t){sw}; {comment}")
             else:
                 lines.append(f"eax = (eax & 0xFFFF0000u) | {sw}; {comment}")
-            # The flag state is left alone on purpose: `fnstsw` changes no
-            # flags, so a following `sahf` (2 sites in Focom.exe) still finds
-            # the 'fcom' state and the unsigned jcc after it maps correctly.
+            # The flag state is left alone: `fnstsw` changes no flags. A
+            # following `sahf` (2 sites in Focom.exe) loads them from ah.
 
         elif m == 'lahf':
             # ah <- SF ZF 0 AF 0 PF 1 CF, from whatever the lazy state holds.
@@ -1918,11 +1905,8 @@ class Lifter:
             lines.append(f"SET_LO8(eax, MEM8(ebx + LO8(eax))); {comment}")
 
         elif m == 'ftst':
-            # Compare ST(0) with 0.0. Same -1/0/1 convention as fcom, which is
-            # what the flag-consumer path already reads.
+            # Compare ST(0) with 0.0, into the condition codes like fcom.
             lines.append(f"_fpu_cmp = FPU_CMP(_st[0], 0.0); {comment}")
-            self._flag_state = ('fcom', '_fpu_cmp')
-            self._flag_seq += 1
 
         elif m == 'fldl2e':
             lines.append(f"fp_push(1.4426950408889634); /* log2(e) */ {comment}")

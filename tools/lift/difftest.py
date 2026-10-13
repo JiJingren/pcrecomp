@@ -133,6 +133,26 @@ CASES = [
          mem={SCRATCH: struct.pack('<ff', -0.5, 0.0)}, undef=('AF',)),
     Case('fpu.lt-zero-parity-pos', bytes.fromhex('d906d85e04dfe0f6c4050f9ac1'),
          mem={SCRATCH: struct.pack('<ff', 0.5, 0.0)}, undef=('AF',)),
+    # The x87 compares write C0 C2 C3, never EFLAGS, so a jcc after one still
+    # reads the integer instruction before it. MSVC schedules them that way:
+    # fld [esi]; fld [esi+4]; test ecx, ecx; fucom st(1); (fnstsw ax;)
+    # fstp st(1); sete dl; fstp st(0) (Bully's camera, 0x00509E84; the fnstsw
+    # is left out because this model has no TOP field to report). The sete
+    # read the floats instead, and Bully passed a null pointer on.
+    Case('fpu.fucom-keeps-eflags-zero', bytes.fromhex('d906d9460485c9dde1ddd90f94c2ddd8'),
+         regs={'ecx': 0}, mem={SCRATCH: struct.pack('<ff', 0.5, 1.0)}, undef=('AF',)),
+    Case('fpu.fucom-keeps-eflags-nonzero', bytes.fromhex('d906d9460485c9dde1ddd90f94c2ddd8'),
+         regs={'ecx': 3}, mem={SCRATCH: struct.pack('<ff', 1.0, 1.0)}, undef=('AF',)),
+    # ...and where the sete is a join point, so the lifter reads the flag kind
+    # at run time: the compare must not have changed that either.
+    Case('fpu.fucom-keeps-eflags-join', bytes.fromhex('d906d9460485c9dde1ddd90f94c2ddd8'),
+         regs={'ecx': 0}, mem={SCRATCH: struct.pack('<ff', 0.5, 1.0)}, undef=('AF',), joins=(11,)),
+    # fld; fld; test ecx, ecx; fcompp; sete dl
+    Case('fpu.fcompp-keeps-eflags', bytes.fromhex('d906d9460485c9ded90f94c2'),
+         regs={'ecx': 0}, mem={SCRATCH: struct.pack('<ff', 0.5, 1.0)}, undef=('AF',)),
+    # test ecx, ecx; fld [esi]; ftst; fstp st(0); sete dl
+    Case('fpu.ftst-keeps-eflags', bytes.fromhex('85c9d906d9e4ddd80f94c2'),
+         regs={'ecx': 0}, mem={SCRATCH: struct.pack('<f', 0.5)}, undef=('AF',)),
     # The same with the setp at a join point (a branch target, or any
     # instruction of a function that labels them all): the lifter forgets its
     # static flag state there and the setp reads the kind at runtime
