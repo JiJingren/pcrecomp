@@ -39,6 +39,63 @@ versions follow [SemVer](https://semver.org/).
   slot is a seed and an entry off the slot grid is dropped. A thunk reached
   only through a runtime pointer was otherwise hidden by a decode straddling
   it (Monster Truck Madness 2: 4,623 slots, 914 missing). (#81)
+- win32hle user32: a menu model and MDI, driven by SimCity 2000's MFC MDI
+  frame. Menus (`CreateMenu`/`CreatePopupMenu`/`AppendMenuA`/`InsertMenuA`/
+  `ModifyMenuA`/`DeleteMenu`/`GetMenuItemCount`/`GetSubMenu`/`CheckMenuItem`/
+  `EnableMenuItem`/`GetMenuState`/`CheckMenuRadioItem`/…) over a real item tree,
+  and `LoadMenuA` parses the classic MENU resource (UTF-16 item text) into it —
+  not drawn yet, but a program queries and edits them constantly. The MDI client
+  (a built-in `mdiclient` class whose `WM_MDICREATE` opens a child view) and the
+  frame/child default procs `DefFrameProcA`/`DefMDIChildProcA`. `DeferWindowPos`
+  (`Begin`/`Defer`/`End`, applied at once) for a frame's bar/client layout, and
+  `EqualRect`. With these SimCity 2000 runs its whole MFC startup on Linux — its
+  MDI main frame, the document child view, and the window layout — into building
+  its toolbar (next: COMCTL32 `ImageList_*`, then the 8-bit DIB blit + a window
+  surface for visible pixels).
+
+### Added
+- win32hle gdidc: the GDI palette cluster — `CreatePalette`/`GetPaletteEntries`/
+  `SetPaletteEntries`/`AnimatePalette`/`GetNearestPaletteIndex`/`SelectPalette`/
+  `RealizePalette`/`ResizePalette`/`GetSystemPaletteEntries`/`SetSystemPaletteUse`
+  (a palette is up to 256 COLORREFs; a DC carries a selected palette, so an 8bpp
+  DIB can blit through it). user32: the MDI default procs `DefFrameProcA` /
+  `DefMDIChildProcA`. With these SimCity 2000 runs its whole MFC startup on
+  Linux — registration, the palette setup, its MDI main frame — into building
+  its menu bar.
+
+### Added
+- win32hle: more of the MFC/GDI surface, driven by SimCity 2000 on Linux
+  (its CRT, MFC startup, registration check, 256-colour video warning, and data
+  loading now run). user32: the WH_CBT hook (`SetWindowsHookExA`/`CallNextHookEx`/
+  `UnhookWindowsHookEx`), fired with `HCBT_CREATEWND` before `WM_NCCREATE`, so
+  MFC subclasses each window as it is created — how `CWnd` attaches to an `HWND`;
+  plus `RegisterWindowMessageA` and `SetMessageQueue`. module: an EXE's own
+  resources are now found — the main image is registered before it is mapped, so
+  its resource directory (`DataDirectory[2]`) is read lazily on first lookup;
+  without this MFC's strings/dialogs were empty and it aborted. kernel32:
+  `GetFullPathNameA` (lexical) and the Win16 `_lopen`/`_lcreat`/`_lread`/
+  `_lwrite`/`_lclose`/`_llseek` file family on the host descriptor table.
+  advapi32: `HLE_REGTRACE` logs registry access during bring-up.
+
+### Added
+- win32hle gdidc: a GDI object model and drawing, for the MFC/GDI titles the
+  DirectDraw path never exercised. Brushes (`CreateSolidBrush`/`CreateHatchBrush`/
+  `CreateBrushIndirect`), pens (`CreatePen`/`CreatePenIndirect`), bitmaps
+  (`CreateCompatibleBitmap`/`CreateBitmap`, selectable into a memory DC), and the
+  stock objects (`GetStockObject` now returns real brush/pen objects); plus
+  `FillRect`/`FrameRect`/`Rectangle`/`PatBlt`/`SetPixel`/`GetPixel`/`MoveToEx`/
+  `LineTo` and DC→DC `BitBlt`/`StretchBlt` (like-for-like bpp — a game's own
+  back-buffer-to-window blit). `CreateCompatibleDC`/`DeleteDC` now return real
+  DCs (moved from gdi32.c) so a bitmap selected into a memory DC can be blitted.
+  Surfaced bringing SimCity 2000 up on Linux: it runs its CRT, MFC `AfxWinInit`,
+  window-class registration and GDI object setup, into MFC window creation.
+- win32hle user32: `RegisterWindowMessageA` (name→id interning, 0xC000..; MFC
+  leans on it) and `SetMessageQueue` (obsolete since Win32 → succeeds).
+- win32hle kernel32: global atoms (`GlobalAddAtomA`/`GlobalFindAtomA`/
+  `GlobalDeleteAtom`/`GlobalGetAtomNameA`) — MFC registers its window classes by
+  atom at startup; general to any MFC title.
+
+### Added
 - dos32: save states. `dos32_state_save` / `dos32_state_load` write the whole
   machine to a file and back: registers, the host's tables, the chips, and
   memory with all-zero pages left out (about 8 MB for Theme Park). A state
