@@ -6,6 +6,12 @@ versions follow [SemVer](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- lift16: `Lifter.push_calls`, calls made by hand: `push cs / push label /
+  [push 0] / jmp far seg:routine` (the routine's near ret pops the 0 into a
+  lone `retf` at seg:0000), the near `push label / jmp`, and the `retf` form
+  for a pushed target. The driver names each jump; lift16 lifts it as a C call
+  that pops what the trampoline would, then continues at the label. Found on
+  Microsoft Space Simulator, 481 call sites. Opt-in. (#85)
 - dos32: builds and runs on Linux with gcc or clang, from the same source. The
   Win32 it used (the 4 GB reservation, locks, the clock, the fault handler, the
   CRT's file calls) has POSIX stand-ins, and guest paths match names on disk
