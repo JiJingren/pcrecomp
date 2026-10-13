@@ -187,6 +187,8 @@ versions follow [SemVer](https://semver.org/).
   divisor (and INT64_MIN / -1 no longer kills the host), and `cpu->cs:ip`
   is set to the divide before `DIV0_FN`, so a runtime can give a game's
   INT 0 handler the frame it reads. `test_lift16_div.py`. (#91)
+- lift32: `loope`/`loopne` test ZF, not CF. A `loopne` after anything that
+  left the carry set ended early (Streets of SimCity's texture spans). (#93)
 - lift32: `repz ret` (F3 C3) lifts as a `ret`, and generate.py's extent walk
   ends a body at it. It was UNIMPLEMENTED, so MSVC 2005's
   `__security_check_cookie` fell through into `__report_gsfailure` and every
