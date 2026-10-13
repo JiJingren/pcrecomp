@@ -179,6 +179,10 @@ versions follow [SemVer](https://semver.org/).
   the carry; `rcr eax, 1` was garbage. Microsoft Space Simulator's Kepler
   solver never converged. difftest16 no longer compares OF after
   `shld`/`shrd` with a count other than 1. (#88)
+- lift16: a divide faults on quotient overflow too, not only on a zero
+  divisor (and INT64_MIN / -1 no longer kills the host), and `cpu->cs:ip`
+  is set to the divide before `DIV0_FN`, so a runtime can give a game's
+  INT 0 handler the frame it reads. `test_lift16_div.py`. (#91)
 - lift32: `repz ret` (F3 C3) lifts as a `ret`, and generate.py's extent walk
   ends a body at it. It was UNIMPLEMENTED, so MSVC 2005's
   `__security_check_cookie` fell through into `__report_gsfailure` and every
