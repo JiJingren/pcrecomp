@@ -25,6 +25,10 @@ versions follow [SemVer](https://semver.org/).
   the guest unwound past (`mov sp, [saved] / ret` from deep inside), checked
   after each call. Microsoft Space Simulator's SMDL interpreter aborts this
   way. Opt-in. (#90)
+- iso_peek: reads a disc's Joliet tree when it has one, so files come out
+  under their real names (long, mixed case) rather than the 8.3 ISO9660 ones,
+  and names 8.3 cannot spell are found at all. Discs without Joliet read as
+  before. (#92)
 - dos32: builds and runs on Linux with gcc or clang, from the same source. The
   Win32 it used (the 4 GB reservation, locks, the clock, the fault handler, the
   CRT's file calls) has POSIX stand-ins, and guest paths match names on disk
