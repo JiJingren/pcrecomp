@@ -17,8 +17,11 @@ still lifts as a counted UNIMPLEMENTED line.
 Covered: the scalar and packed float arithmetic, moves, compares (comiss
 and friends set EFLAGS the way sahf does, as a FK_EFLAGS word), shuffles and
 unpacks, the conversions, ldmxcsr/stmxcsr, and the integer SSE2 forms that
-MSVC's own code uses (pxor/pand/por/pandn, psrldq/pslldq, punpck*qdq,
-pshufd, paddd/psubd, movd/movq). Not the rest of packed integer SSE2.
+MSVC's code and its CRT's SSE2 math library use (pxor/pand/por/pandn,
+psrldq/pslldq, punpck*qdq, pshufd, paddd/psubd, movd/movq, the lane shifts,
+pcmpeq/pcmpgt, pextrw/pinsrw, pmovmskb, pmaxsw/pminsw). Not the rest of
+packed integer SSE2: anything else with an xmm operand lifts as a counted
+UNIMPLEMENTED line, never as its MMX namesake.
 Checked against hardware by tools/lift/difftest.py (the sse.* cases).
 """
 
@@ -33,6 +36,14 @@ ARITH = {'add': '({a} + {b})', 'sub': '({a} - {b})', 'mul': '({a} * {b})', 'div'
          'min': 'sse_min{t}({a}, {b})', 'max': 'sse_max{t}({a}, {b})',
          'sqrt': 'sqrt{f}({b})', 'rcp': '(1.0{F} / {b})', 'rsqrt': '(1.0{F} / sqrt{f}({b}))'}
 BITWISE = {'and': '{a} & {b}', 'andn': '~{a} & {b}', 'or': '{a} | {b}', 'xor': '{a} ^ {b}'}
+# psXXx on xmm: (lane kind, lane bits, arithmetic).
+SHIFTS = {'psrlw': ('u16', 16, 0), 'psrld': ('u32', 32, 0), 'psrlq': ('u64', 64, 0),
+          'psllw': ('u16', 16, 0), 'pslld': ('u32', 32, 0), 'psllq': ('u64', 64, 0),
+          'psraw': ('i16', 16, 1), 'psrad': ('i32', 32, 1)}
+# pcmpXXx on xmm: (lane kind, C comparison); the gt forms are signed.
+PCMP = {'pcmpeqb': ('u8', '=='), 'pcmpeqw': ('u16', '=='), 'pcmpeqd': ('u32', '=='),
+        'pcmpgtb': ('i8', '>'), 'pcmpgtw': ('i16', '>'), 'pcmpgtd': ('i32', '>')}
+_CT = {'u8': 'uint8_t', 'u16': 'uint16_t', 'u32': 'uint32_t', 'u64': 'uint64_t'}
 
 
 def _xi(op):
@@ -204,6 +215,39 @@ def lift_sse(L, m, ops, comment):
         o = '+' if m.startswith('padd') else '-'
         return one(f"{{ xmm_t _s = {X(s)}; for (int _k = 0; _k < {n}; _k++) "
                    f"_xmm[{di}].{k}[_k] {o}= _s.{k}[_k]; }}")
+    # Lane shifts. The count is an immediate or the low quadword of an xmm or
+    # memory operand, and a count at or past the lane width zeroes the lane
+    # (all sign bits for psra*), where C calls the shift undefined.
+    if m in SHIFTS and di is not None:
+        k, bits, arith = SHIFTS[m]
+        cnt = f"{s.imm & 0xFF}u" if s.type == X86_OP_IMM else f"{lane(s, 0, 'u64')}"
+        if arith:
+            st = 'i16' if bits == 16 else 'i32'
+            body = f"_xmm[{di}].{st}[_k] = _xmm[{di}].{st}[_k] >> (_c > {bits - 1} ? {bits - 1} : (int)_c);"
+        else:
+            o = '>>' if m.startswith('psrl') else '<<'
+            body = f"_xmm[{di}].{k}[_k] = _c > {bits - 1} ? 0 : ({_CT[k]})(_xmm[{di}].{k}[_k] {o} _c);"
+        return one(f"{{ uint64_t _c = {cnt}; for (int _k = 0; _k < {128 // bits}; _k++) {body} }}")
+    if m in PCMP and di is not None:
+        k, o = PCMP[m]
+        n = {'u8': 16, 'i8': 16, 'u16': 8, 'i16': 8, 'u32': 4, 'i32': 4}[k]
+        uk = {'i8': 'u8', 'i16': 'u16', 'i32': 'u32'}.get(k, k)
+        rd = f"(int8_t)_s.u8[_k]" if k == 'i8' else f"_s.{k}[_k]"
+        dd = f"(int8_t)_xmm[{di}].u8[_k]" if k == 'i8' else f"_xmm[{di}].{k}[_k]"
+        return one(f"{{ xmm_t _s = {X(s)}; for (int _k = 0; _k < {n}; _k++) "
+                   f"_xmm[{di}].{uk}[_k] = ({dd} {o} {rd}) ? ({_CT[uk]})~0u : 0; }}")
+    if m in ('pmaxsw', 'pminsw') and di is not None:
+        o = '>' if m == 'pmaxsw' else '<'
+        return one(f"{{ xmm_t _s = {X(s)}; for (int _k = 0; _k < 8; _k++) "
+                   f"if (_s.i16[_k] {o} _xmm[{di}].i16[_k]) _xmm[{di}].i16[_k] = _s.i16[_k]; }}")
+    if m == 'pextrw' and _xi(s) is not None:
+        return one(f"{L._fmt_write(d, f'(uint32_t)_xmm[{_xi(s)}].u16[{ops[2].imm & 7}]')};")
+    if m == 'pinsrw' and di is not None:
+        return one(f"_xmm[{di}].u16[{ops[2].imm & 7}] = (uint16_t)({L._fmt_read(s)});")
+    if m == 'pmovmskb' and _xi(s) is not None:
+        return one(f"{{ uint32_t _m = 0; for (int _k = 0; _k < 16; _k++) "
+                   f"_m |= (uint32_t)(_xmm[{_xi(s)}].u8[_k] >> 7) << _k; "
+                   f"{L._fmt_write(d, '_m')}; }}")
 
     # ---- conversions ------------------------------------------------------------
     if m in ('cvtsi2ss', 'cvtsi2sd'):
@@ -237,7 +281,13 @@ def lift_sse(L, m, ops, comment):
     if m == 'cvtpd2ps':
         return one(f"{{ xmm_t _s = {X(s)}; _xmm[{di}].f32[0] = (float)_s.f64[0]; "
                    f"_xmm[{di}].f32[1] = (float)_s.f64[1]; _xmm[{di}].u64[1] = 0; }}")
-    return None
+    if m == 'cvtdq2pd':
+        return one(f"{{ int32_t _a = (int32_t){lane(s, 0, 'u32')}, _b = (int32_t){lane(s, 1, 'u32')}; "
+                   f"_xmm[{di}].f64[0] = _a; _xmm[{di}].f64[1] = _b; }}")
+    # Anything else with an xmm operand is counted, never handed back: lift32's
+    # MMX forms share these mnemonics (psrlq, pcmpeqd) and would lift the xmm
+    # register as "unknown reg", a silent wrong value instead of a counted gap.
+    return [f"; /* UNIMPLEMENTED: {m} */ {comment}"]
 
 
 def _bitwise(fmt, di, src, comment):

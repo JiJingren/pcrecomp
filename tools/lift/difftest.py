@@ -727,6 +727,21 @@ def _sse_forms():
             out.append(Case('sse.%s%s' % (name, tag), load + bytes.fromhex(op) + store,
                             regs={'eax': 0xFFFFFF85}, mem={SCRATCH: data + extra},
                             undef=('AF',) if 'lahf' in name else ()))
+    # packed integer SSE2 on xmm: the lane shifts (saturating counts included),
+    # compares, word extract/insert, byte mask, and the conversion to double.
+    # Each also has an MMX form, which these must never be lifted as.
+    for name, op in {'psrlq.imm': '660f73d00c', 'psllq.imm': '660f73f034', 'psrlq.xmm': '660fd3c1',
+                     'psrlq.mem': '660fd34620', 'psrld.imm': '660f72d005', 'pslld.imm': '660f72f01f',
+                     'psrad.imm': '660f72e004', 'psrad.sat': '660f72e021', 'psraw.imm': '660f71e003',
+                     'psrlw.sat': '660f71d011', 'psllw.imm': '660f71f004',
+                     'pcmpeqb': '660f74c1', 'pcmpeqw': '660f75c1', 'pcmpeqd': '660f76c1',
+                     'pcmpgtb': '660f64c1', 'pcmpgtw': '660f65c1', 'pcmpgtd': '660f66c1',
+                     'pmaxsw': '660feec1', 'pminsw': '660feac1',
+                     'pextrw': '660fc5c003', 'pextrw.6': '660fc5c906', 'pinsrw': '660fc4c005',
+                     'pinsrw.mem': '660fc44e0802', 'pmovmskb': '660fd7c0', 'cvtdq2pd': 'f30fe6c1'}.items():
+        for tag, data in (('', ps), ('.int', ints)):
+            out.append(Case('sse.%s%s' % (name, tag), load + bytes.fromhex(op) + store,
+                            regs={'eax': 0xFFFFFF85, 'ecx': 0x12345678}, mem={SCRATCH: data + extra}))
     # double precision on its own data
     for name, op in {'addsd': 'f20f58c1', 'subsd': 'f20f5cc1', 'mulsd': 'f20f59c1', 'divsd': 'f20f5ec1',
                      'minsd': 'f20f5dc1', 'maxsd': 'f20f5fc1', 'comisd': '660f2fc1', 'ucomisd': '660f2ec1',
