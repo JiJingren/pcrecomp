@@ -241,6 +241,66 @@ int native32_in_guest(uint32_t va) {
     return 0;
 }
 
+/* native32_hold_image: see the header. The child is marked by an environment
+ * variable, so it never launches again; the standard handles are passed on
+ * explicitly, so a harness reading a pipe sees the child's output. */
+#define NATIVE32_HELD_ENV "NATIVE32_HELD"
+
+int native32_hold_image(const char* path, uint32_t base) {
+    char flag[16], me[MAX_PATH];
+    if (GetEnvironmentVariableA(NATIVE32_HELD_ENV, flag, sizeof flag)) {
+        SetEnvironmentVariableA(NATIVE32_HELD_ENV, NULL);  /* not passed on to what the guest starts */
+        return 1;
+    }
+    IMAGE_DOS_HEADER dos;
+    IMAGE_NT_HEADERS32 nt;
+    FILE* f = fopen(path, "rb");
+    int ok = f && fread(&dos, sizeof dos, 1, f) == 1 && fseek(f, dos.e_lfanew, SEEK_SET) == 0 &&
+             fread(&nt, sizeof nt, 1, f) == 1 && nt.Signature == IMAGE_NT_SIGNATURE;
+    if (f) fclose(f);
+    if (!ok) return 0;
+    uint32_t span = nt.OptionalHeader.SizeOfImage;
+
+    STARTUPINFOA si = { sizeof si };
+    PROCESS_INFORMATION pi;
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    si.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
+    si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
+    HANDLE std[3] = { si.hStdInput, si.hStdOutput, si.hStdError };
+    for (int i = 0; i < 3; i++)
+        if (std[i] && std[i] != INVALID_HANDLE_VALUE) SetHandleInformation(std[i], HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
+    GetModuleFileNameA(NULL, me, MAX_PATH);
+    SetEnvironmentVariableA(NATIVE32_HELD_ENV, "1");
+    BOOL made = CreateProcessA(me, GetCommandLineA(), NULL, NULL, TRUE, CREATE_SUSPENDED, NULL, NULL, &si, &pi);
+    SetEnvironmentVariableA(NATIVE32_HELD_ENV, NULL);
+    if (!made) {
+        fprintf(stderr, "[native32] cannot start the host again (error %lu)\n", GetLastError());
+        return 0;
+    }
+    if (!VirtualAllocEx(pi.hProcess, (void*)(uintptr_t)base, span, MEM_RESERVE, PAGE_NOACCESS)) {
+        fprintf(stderr, "[native32] 0x%08X+0x%X is taken at process start (error %lu): link the host "
+                "with a small /STACK and run the lifted code on a thread with a large one\n",
+                base, span, GetLastError());
+        TerminateProcess(pi.hProcess, 1);
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        return 0;
+    }
+    HANDLE job = CreateJobObjectA(NULL, NULL);
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION lim = { 0 };
+    lim.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    if (job) {
+        SetInformationJobObject(job, JobObjectExtendedLimitInformation, &lim, sizeof lim);
+        AssignProcessToJobObject(job, pi.hProcess);
+    }
+    ResumeThread(pi.hThread);
+    WaitForSingleObject(pi.hProcess, INFINITE);
+    DWORD code = 1;
+    GetExitCodeProcess(pi.hProcess, &code);
+    ExitProcess(code);
+}
+
 uint32_t native32_map(const char* path, uint32_t base) {
     uint32_t span = recomp_load_image(path, base);
     if (!span || g_mod_n == MAX_MODULES) return 0;
