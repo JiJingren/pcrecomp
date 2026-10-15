@@ -18,6 +18,11 @@ versions follow [SemVer](https://semver.org/).
 - pdb_ref: a scoring reference from the vendor's PDB, fetched from the
   symbol server by CodeView id. Stripped public PDBs are read from publics
   plus `/Gy` COMDAT ranges, minus PGO chunks and string-literal COMDATs.
+- disasm64 / generate64 eh_tables: `__CxxFrameHandler4` tables, and
+  functions that carry only `UNW_FLAG_UHANDLER`. FH4 unwind maps call
+  destructors by RVA, so leaf destructors were reachable from nowhere else:
+  diagtrack.dll recall 79.57% to 85.78%, the rest being funclets nothing
+  references.
 - lift16: `Lifter.push_calls`, calls made by hand: `push cs / push label /
   [push 0] / jmp far seg:routine` (the routine's near ret pops the 0 into a
   lone `retf` at seg:0000), the near `push label / jmp`, and the `retf` form

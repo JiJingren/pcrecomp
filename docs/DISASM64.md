@@ -16,7 +16,7 @@ the seeds are read, not guessed:
 | Guard CF table | load config, `/guard:cf` (all of Windows) | functions whose address is never taken |
 | exports, entry point | export directory, optional header | |
 | DIR64 relocations into code | `.reloc` | |
-| EH funclets | C++ FuncInfo (generate64's `eh_tables`) and `__C_specific_handler` scope tables | |
+| EH funclets | C++ FuncInfo, FH3 and FH4 (generate64's `eh_tables`), and `__C_specific_handler` scope tables | |
 | `jmp rel32` thunks | int3-padded stubs (generate64's `jmp_thunks`) | |
 
 Recursive descent from those finds the leaves through `call rel32`.
@@ -52,6 +52,13 @@ are from Windows 11 24H2, build 26100.4349.
   them had been catalogued as functions. They are now rejected by
   `looks_like_string`: NUL-terminated ASCII or UTF-16LE, or a leading NUL
   for `""`.
+- **C++ code compiled for `__CxxFrameHandler4`** (MSVC 2019 and later) has
+  compressed EH tables, and `eh_tables` read only the FH3 layout. FH4's
+  unwind map calls destructors directly by RVA, so a leaf
+  `std::vector::~vector` with no `.pdata` is reached only from that map.
+  Functions with destructors and no `try` carry only `UNW_FLAG_UHANDLER`,
+  and those were skipped too. diagtrack.dll's recall went from 79.57% to
+  85.78%.
 
 ## The reference: stripped PDBs
 
@@ -94,11 +101,18 @@ Windows 11 24H2 26100.4349 (Pro), commands as in the README:
 | ntoskrnl.exe | 30,139 | 97.86% | 99.20% | 96.72% | 25 s |
 | win32kfull.sys | 9,684 | 96.73% | 99.99% | 97.42% | 8 s |
 | win32kbase.sys | 9,181 | 99.57% | 99.98% | 98.65% | 6 s |
+| diagtrack.dll | 18,661 | 99.99% | 85.78% | 88.08% | 9 s |
 
 kernel32's catalog lifts through generate64 with 0 lift errors. The closure
 adds 29 entries over 5 rounds.
 
 ## Known gaps
+
+- **Unreferenced EH funclets.** 2,299 of diagtrack's 2,654 misses are
+  destructor funclets (`lea rcx, [rdx+N]; jmp dtor`) whose address appears
+  nowhere in the file, as an RVA or as a rel32. They are left over after the
+  compiler merged unwind states, and they never run. Counting only functions
+  something refers to, diagtrack's recall is 97.83%.
 
 - **Functions reached only by a conditional tail jump**, such as ntdll's
   `Feature_*__private_IsEnabledFallback` stubs, are absorbed into the

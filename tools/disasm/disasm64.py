@@ -47,7 +47,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from disasm32 import decode  # noqa: E402
 from generate64 import (rva_to_off, reloc_code_pointers, jmp_thunks,  # noqa: E402
-                        eh_tables)
+                        eh_tables, _fh4_uint)
 
 IMAGE_SCN_MEM_EXECUTE = 0x20000000
 TERMINATORS = {'ret', 'retf', 'int3', 'ud2', 'hlt', 'iretq', 'sysret'}
@@ -512,6 +512,12 @@ def selftest():
     d.pe.data = d.pe.data[:0x400 + 0x100] + b'\x48\x83\xc4\x08' + d.pe.data[0x404 + 0x100:]
     assert d._drops_return(base + text + 0x100)                     # add rsp, 8
     assert not d._drops_return(base + text + 0xA0)                  # xor eax, eax
+    # FH4 compressed ints: 1, 2, 3, 4 and 5-byte forms
+    assert _fh4_uint(b'\x0a', 0) == (5, 1)
+    assert _fh4_uint(b'\x05\x01', 0) == (0x41, 2)
+    assert _fh4_uint(b'\x0b\x00\x01', 0) == (0x2001, 3)
+    assert _fh4_uint(b'\x17\x00\x00\x01', 0) == (0x100001, 4)
+    assert _fh4_uint(b'\x0f\x78\x56\x34\x12', 0) == (0x12345678, 5)
     print('disasm64 selftest: ok')
 
 
