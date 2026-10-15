@@ -287,7 +287,11 @@ class Disassembler64:
                     ins.operands[1].size == 1 and \
                     _canon(ins.reg_name(ins.operands[0].reg)) == idx:
                 bm = ins.operands[1].mem
-                if bm.base and _canon(ins.reg_name(bm.base)) in bases and bm.scale == 1:
+                # A byte table indexed by a register: `movzx eax, byte [rB+0x1234]`
+                # with no index is a plain load, not the switch's index table
+                # (diagtrack.dll on 26100.4349 has one, and it crashed here).
+                if bm.base and bm.index and bm.scale == 1 and \
+                        _canon(ins.reg_name(bm.base)) in bases:
                     bytes_at, idx = self.pe.base + bm.disp, _canon(ins.reg_name(bm.index))
                 break
         bound = None
