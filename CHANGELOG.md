@@ -6,6 +6,23 @@ versions follow [SemVer](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- disasm64: x86-64 function recovery for PE32+, so the 64-bit path no longer
+  needs an IDA catalog. Seeds from `.pdata` primary entries (chained entries
+  are cold chunks, not functions), the Guard CF table, exports, DIR64
+  relocations (string literals rejected), C++ and `__C_specific_handler`
+  funclets, then recursive descent with MSVC x64 switch tables. Writes
+  generate64's `funcs.txt`. Scored against Microsoft's PDBs on Windows 11
+  26100.4349: 96.7-99.6% precision, 98.4-99.99% recall, 96.5-98.7% exact
+  ends across ntdll, kernel32, kernelbase, ntoskrnl and win32k
+  (docs/DISASM64.md).
+- pdb_ref: a scoring reference from the vendor's PDB, fetched from the
+  symbol server by CodeView id. Stripped public PDBs are read from publics
+  plus `/Gy` COMDAT ranges, minus PGO chunks and string-literal COMDATs.
+- disasm64 / generate64 eh_tables: `__CxxFrameHandler4` tables, and
+  functions that carry only `UNW_FLAG_UHANDLER`. FH4 unwind maps call
+  destructors by RVA, so leaf destructors were reachable from nowhere else:
+  diagtrack.dll recall 79.57% to 85.78%, the rest being funclets nothing
+  references.
 - lift16: `Lifter.push_calls`, calls made by hand: `push cs / push label /
   [push 0] / jmp far seg:routine` (the routine's near ret pops the 0 into a
   lone `retf` at seg:0000), the near `push label / jmp`, and the `retf` form

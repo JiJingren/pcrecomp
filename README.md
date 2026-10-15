@@ -71,7 +71,7 @@ on what the binary is:
 | Stage | 16-bit DOS (MZ) | 16-bit Windows (NE) | 32-bit PE | 64-bit PE |
 |-------|-----------------|---------------------|-----------|-----------|
 | Analyse | `disasm/decode16` | `ne/ne_parse`, `ne/ne_xref` | `pe/pe_analyze`, `pe/catalog`, `pe/extract_imports` | same as 32-bit |
-| Find functions | `disasm/analyze`, `disasm/largemodel16` | `ne/ne_decode` (or IDA via `ida/ida_export`) | `disasm/disasm32`, `cpp/rtti`, `cpp/vtable_scan`, `lift/recover`, `disasm/seed_from_log` | an IDA catalog, closed by `lift/generate64` |
+| Find functions | `disasm/analyze`, `disasm/largemodel16` | `ne/ne_decode` (or IDA via `ida/ida_export`) | `disasm/disasm32`, `cpp/rtti`, `cpp/vtable_scan`, `lift/recover`, `disasm/seed_from_log` | `disasm/disasm64` (no IDA), closed by `lift/generate64` |
 | Lift | `lift/lift16` | `lift/ne_lift` | `lift/lift32` (global registers) or `lift/lift32_cpu` (CPU struct) | `lift/lift64_cpu` |
 | Generate the build tree | the project's own driver | `ne/gen_segments_h`, `ne/gen_unresolved_stubs`, `ne/gen_win16_stubs`, `ne/gen_image` | `python -m tools` (`lift/translator`), `lift/generate` | `lift/generate64` |
 | Runtime | `runtime/recomp16` | `runtime/win16` | `runtime/recomp32` or `recomp32_cpu`, plus `hybrid`; host it with `native32` (on Windows) or `win32hle` (off Windows, e.g. Linux) | `runtime/recomp64_cpu` |
@@ -94,6 +94,7 @@ or IDA, whatever the architecture.
 | `stdcall_argc.py` | Each import's stdcall stack purge, from the SDK's `_Name@N` decorations instead of a hand-typed table |
 | `rsrc.py` | List and extract `.rsrc` (bitmaps get their file header back, so they open) |
 | `map_names.py` | Names from an MSVC linker MAP; `port` carries library names onto a binary that shipped without one |
+| `pdb_ref.py` | A scoring reference from the vendor's PDB, fetched from the symbol server; handles stripped public PDBs (publics + `/Gy` COMDAT ranges) |
 | `debug_symbols.py` | Which source file each function came from, from surviving `__FILE__` strings |
 | `merge_names.py` | Every name source (MAP > RTTI > `__FILE__` > anything else) merged into one C-safe name per address |
 
@@ -102,6 +103,7 @@ or IDA, whatever the architecture.
 | Tool | What it does |
 |------|--------------|
 | `disasm/disasm32.py` | 32-bit recursive descent from the entry point, exports and `--seed-functions` |
+| `disasm/disasm64.py` | 64-bit PE recovery: `.pdata` (chunks set apart), Guard CF, exports, relocations, SEH/C++ funclets, then recursive descent with MSVC x64 switch tables. Writes generate64's catalog; [docs/DISASM64.md](docs/DISASM64.md) |
 | `disasm/decode16.py` | Table-driven 16-bit decoder: resident image, one overlay, or a byte range |
 | `disasm/analyze.py` | 16-bit function boundaries (MSC 5.x patterns) and a symbol table |
 | `disasm/largemodel16.py` | Library: clips DGROUP off the code and resolves large-model far calls |
