@@ -6,7 +6,9 @@
     return o == UIInterfaceOrientationLandscapeLeft || o == UIInterfaceOrientationLandscapeRight;
 }
 
-- (NSUInteger)supportedInterfaceOrientations { return UIInterfaceOrientationMaskLandscape; }
+- (UIInterfaceOrientationMask)supportedInterfaceOrientations {
+    return UIInterfaceOrientationMaskLandscape;
+}
 
 - (BOOL)prefersStatusBarHidden { return YES; }
 

@@ -12,6 +12,10 @@
 #   IOS_CLANG   clang to use (default $TOOLCHAIN/linux/iphone/bin/clang)
 #   SDKROOT     dir holding iPhoneOS6.0.sdk / iPhoneOS10.3.sdk
 #               (default /home/jjr/theos/sdks)
+#   SDK_<arch>  full path to the SDK for one arch, overriding SDKROOT. Needed
+#               on CI, where theos/sdks has no iPhoneOS6.0.sdk: iPhoneOS9.3
+#               carries armv7 and armv7s and builds the same code fine, as
+#               long as the deployment target stays at 6.0.
 #   FFMPEG      dir with libav*.a + include (default ../../../ffmpeg-ios/dist)
 #   OUT         build tree (default ./.build)
 #   APP_NAME    bundle name (default win32hle)
@@ -52,9 +56,13 @@ TARGET[armv7]="armv7-apple-ios6.0";  MINVER[armv7]="6.0"; SDK[armv7]="iPhoneOS6.
 TARGET[armv7s]="armv7s-apple-ios6.0"; MINVER[armv7s]="6.0"; SDK[armv7s]="iPhoneOS6.0.sdk"
 TARGET[arm64]="arm64-apple-ios7.0";  MINVER[arm64]="7.0"; SDK[arm64]="iPhoneOS10.3.sdk"
 
+for a in "${!TARGET[@]}"; do
+  eval "SDK[$a]=\${SDK_$a:-\$SDKROOT/\${SDK[$a]}}"
+done
+
 for a in $ARCHS; do
   [ -n "${TARGET[$a]:-}" ] || { echo "unsupported arch $a" >&2; exit 1; }
-  [ -d "$SDKROOT/${SDK[$a]}" ] || { echo "missing $SDKROOT/${SDK[$a]}" >&2; exit 1; }
+  [ -d "${SDK[$a]}" ] || { echo "missing SDK for $a: ${SDK[$a]}" >&2; exit 1; }
 done
 
 # ---------------------------------------------------------------- sources
@@ -122,17 +130,19 @@ rm -rf "$OUT"
 mkdir -p "$OUT"
 
 for arch in $ARCHS; do
-  sdk="$SDKROOT/${SDK[$arch]}"
+  sdk="${SDK[$arch]}"
   target="${TARGET[$arch]}"
   minv="${MINVER[$arch]}"
   objdir="$OUT/$arch"
   mkdir -p "$objdir"
 
   common=(-target "$target" -isysroot "$sdk" -miphoneos-version-min="$minv")
-  # theos' clang warns on every frame; keep the output about our own code
-  common+=(-Wno-deprecated-declarations)
+  # theos' clang warns on every frame; keep the output about our own code.
+  # unguarded-availability matters when the SDK is newer than the deployment
+  # target, which is how the CI builds armv7: iPhoneOS9.3 headers, min 6.0.
+  common+=(-Wno-deprecated-declarations -Wno-error=unguarded-availability)
 
-  echo "=== $arch  $target  (SDK ${SDK[$arch]})"
+  echo "=== $arch  $target  (SDK $sdk)"
 
   srcs=()
   for f in "${SHIM_C[@]}" "${IOS_C[@]}"; do

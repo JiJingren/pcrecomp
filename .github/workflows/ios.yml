@@ -1,0 +1,234 @@
+name: win32hle-ios
+
+on:
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'runtime/win32hle/**'
+      - '.github/workflows/ios.yml'
+  pull_request:
+    paths:
+      - 'runtime/win32hle/**'
+      - '.github/workflows/ios.yml'
+  workflow_dispatch:
+    inputs:
+      archs:
+        description: 'space separated archs'
+        required: false
+        default: armv7 armv7s
+      with_bink:
+        description: '1 = link FFmpeg and answer BINKW32, 0 = leave movies out'
+        required: false
+        default: '1'
+      ffmpeg_tag:
+        description: FFmpeg release tag to take the archives from
+        required: false
+        default: ffmpeg-7.1-bink-ios
+
+jobs:
+  ipa:
+    name: win32hle.ipa for iOS (Linux + theos clang)
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    env:
+      ARCHS: ${{ github.event.inputs.archs || 'armv7 armv7s' }}
+      WITH_BINK: ${{ github.event.inputs.with_bink || '1' }}
+      FFMPEG_TAG: ${{ github.event.inputs.ffmpeg_tag || 'ffmpeg-7.1-bink-ios' }}
+      WORKSPACE: /home/jjr/pcrecomp
+
+    steps:
+      # /mnt is the big volume on an ubuntu runner. Keep the toolchain, the SDK
+      # and the build tree there and expose the tree as /home/jjr, so build
+      # paths carry a name and the root volume keeps room for runner logs.
+      - name: Prepare /home/jjr
+        run: |
+          set -e
+          echo "=== volumes before ==="; df -h
+          sudo mkdir -p /mnt/jjr
+          sudo chown -R "$(id -u):$(id -g)" /mnt/jjr
+          sudo ln -sfn /mnt/jjr /home/jjr
+          ls -ld /home/jjr /mnt/jjr
+          echo "BIG=/mnt/jjr" >> "$GITHUB_ENV"
+          echo "TOOLCHAIN=/mnt/jjr/.toolchain" >> "$GITHUB_ENV"
+          echo "SDKROOT=/mnt/jjr/iPhoneOS10.3.sdk" >> "$GITHUB_ENV"
+
+      - name: Clone repo to /home/jjr/pcrecomp
+        run: |
+          set -e
+          git clone --depth 1 \
+            "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" \
+            "$WORKSPACE"
+          ls "$WORKSPACE/runtime/win32hle/ios"
+
+      - name: Install iOS toolchain (prebuilt theos clang)
+        run: |
+          set -e
+          mkdir -p "$TOOLCHAIN"
+          curl -sL -o "$BIG/tc.tar.xz" \
+            "https://github.com/L1ghtmann/llvm-project/releases/latest/download/iOSToolchain-$(uname -m).tar.xz"
+          tar -xJf "$BIG/tc.tar.xz" -C "$TOOLCHAIN/"
+          rm -f "$BIG/tc.tar.xz"
+          "$TOOLCHAIN/linux/iphone/bin/clang" --version
+
+      # One SDK for every arch: iPhoneOS10.3 ships armv7, armv7s and arm64.
+      # The deployment targets stay at 6.0 and 7.0, which is what build.sh
+      # passes clang; a newer SDK only means newer headers, and the few APIs
+      # marked as newer are not called.
+      - name: Download iOS SDK (theos/sdks iPhoneOS10.3)
+        run: |
+          set -e
+          curl -sL -o "$BIG/sdk.tar.xz" \
+            "https://github.com/theos/sdks/releases/latest/download/iPhoneOS10.3.sdk.tar.xz"
+          tar -xJf "$BIG/sdk.tar.xz" -C "$BIG"
+          rm -f "$BIG/sdk.tar.xz"
+          test -d "$SDKROOT/usr"
+          grep -m1 -E "^(archs|targets):" "$SDKROOT/usr/lib/libSystem.tbd"
+
+      # This toolchain's clang emits references to libc/unwind entry points the
+      # shipped .tbd stubs do not list; inject them so the link resolves.
+      - name: Patch SDK stubs (add missing libc/unwind symbols)
+        run: |
+          python3 - <<'PY'
+          import os, pathlib, re, yaml
+
+          class L(yaml.SafeLoader):
+              pass
+          def tagged(loader, suffix, node):
+              if isinstance(node, yaml.MappingNode):
+                  return loader.construct_mapping(node)
+              if isinstance(node, yaml.SequenceNode):
+                  return loader.construct_sequence(node)
+              return loader.construct_scalar(node)
+          L.add_multi_constructor('!', tagged)
+
+          PATCH = {
+              'usr/lib/system/libsystem_c.tbd': [
+                  '_bcmp', '_bzero', '_memccpy', '_memchr', '_memcmp', '_memcpy',
+                  '_memmove', '_memset', '_memset_pattern16', '_memset_pattern4',
+                  '_memset_pattern8', '_strchr', '_strcmp', '_strncmp',
+              ],
+              'usr/lib/system/libunwind.tbd': [
+                  '__Unwind_Backtrace', '__Unwind_FindEnclosingFunction',
+                  '__Unwind_Find_FDE', '__Unwind_ForcedUnwind',
+                  '__Unwind_RaiseException', '__Unwind_Resume',
+                  '__Unwind_Resume_or_Rethrow', '___deregister_frame',
+                  '___register_frame', '_unw_get_fpreg', '_unw_get_proc_info',
+                  '_unw_get_proc_name', '_unw_get_reg', '_unw_init_local',
+                  '_unw_is_fpreg', '_unw_is_signal_frame',
+                  '_unw_iterate_dwarf_unwind_cache', '_unw_regname', '_unw_resume',
+                  '_unw_set_fpreg', '_unw_set_reg', '_unw_step',
+              ],
+              'usr/lib/system/libsystem_platform.tbd': [
+                  '_memset_pattern16',
+              ],
+          }
+          sdk = pathlib.Path(os.environ['SDKROOT'])
+          for rel, syms in PATCH.items():
+              p = sdk / rel
+              t = p.read_text()
+              d = yaml.load(re.sub(r'^--- !\S+', '---', t, flags=re.M), Loader=L)
+              have = set()
+              for e in d['exports']:
+                  for v in e.values():
+                      if isinstance(v, list):
+                          have |= set(v)
+              add = [s for s in syms if s not in have]
+              if not add:
+                  print(f'{rel}: already present'); continue
+              i = t.index('symbols:'); j = t.index('[', i)
+              p.write_text(t[:j+1] + ' ' + ', '.join(add) + ',' + t[j+1:])
+              d2 = yaml.load(re.sub(r'^--- !\S+', '---', p.read_text(), flags=re.M), Loader=L)
+              for s in add:
+                  assert s in d2['exports'][0]['symbols'], f'{s} missing after patch'
+              print(f'{rel}: added {len(add)} symbols for archs={d["exports"][0]["archs"]}')
+          PY
+
+      # FFmpeg only when WITH_BINK=1. Release assets, not Actions artifacts:
+      # the account-wide artifact storage quota is shared with every other repo
+      # here and is exhausted.
+      - name: Fetch FFmpeg (minimal bink profile)
+        if: env.WITH_BINK == '1'
+        working-directory: /home/jjr/pcrecomp
+        run: |
+          set -e
+          mkdir -p "$WORKSPACE/.ffmpeg"
+          cd "$WORKSPACE/.ffmpeg"
+          gh release download "$FFMPEG_TAG" --repo JiJingren/ffmpeg-ios
+          tar xzf *.tar.gz
+          d="$(ls -d ffmpeg-ios-*/ | head -1)"
+          ( cd "$d" && sha256sum -c SHA256SUMS.txt )
+          mkdir -p "$WORKSPACE/.ffmpeg/dist"
+          cp -a "$d". "$WORKSPACE/.ffmpeg/dist/"
+          ls -la "$WORKSPACE/.ffmpeg/dist"/*.a
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Build the app
+        working-directory: /home/jjr/pcrecomp/runtime/win32hle/ios
+        run: |
+          set -e
+          set -o pipefail
+          chmod +x build.sh
+          # one SDK for all three archs; build.sh takes a per-arch override
+          export SDK_armv7="$SDKROOT"
+          export SDK_armv7s="$SDKROOT"
+          export SDK_arm64="$SDKROOT"
+          if [ "$WITH_BINK" = 1 ]; then
+            export FFMPEG=/home/jjr/pcrecomp/.ffmpeg/dist
+          fi
+          ./build.sh 2>&1 | tee build.log
+
+      - name: Report
+        working-directory: /home/jjr/pcrecomp/runtime/win32hle/ios
+        run: |
+          set -e
+          LIPO="$TOOLCHAIN/linux/iphone/bin/lipo"
+          OBJDUMP="$TOOLCHAIN/linux/iphone/bin/llvm-objdump"
+          echo "=== architectures ==="
+          "$LIPO" -info .build/win32hle
+          echo "=== frameworks (armv7) ==="
+          "$OBJDUMP" --macho --dylibs-used .build/armv7/win32hle
+          echo "=== deployment target (armv7) ==="
+          "$OBJDUMP" --macho --private-headers .build/armv7/win32hle \
+            | grep -A3 LC_VERSION_MIN_IPHONEOS
+          for a in .build/*.ipa; do
+            [ -e "$a" ] || continue
+            echo "$(basename "$a")  $(stat -c %s "$a") bytes"
+            unzip -l "$a"
+          done
+          # the ipa must be there and the fat binary must have one slice per arch
+          test -f .build/win32hle.ipa
+          n=$("$LIPO" -info .build/win32hle | sed 's/.*are: //' | wc -w)
+          want=$(echo $ARCHS | wc -w)
+          echo "slices: $n (wanted $want)"
+          test "$n" -eq "$want"
+
+      - name: Publish the .ipa to a GitHub Release
+        if: always()
+        working-directory: /home/jjr/pcrecomp/runtime/win32hle/ios
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          TAG="win32hle-ios-${{ github.run_number }}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release delete "$TAG" --yes --cleanup-tag
+          fi
+          gh release create "$TAG" --target "${{ github.event.repository.default_branch }}" \
+            --title "win32hle for iOS, run ${{ github.run_number }} (${ARCHS})" \
+            --notes "ldid-signed. Install with a jailbreak tool or install-profile tooling; the app targets iOS 6.0 and up and has no simulator slice. WITH_BINK=$WITH_BINK." \
+            .build/win32hle.ipa
+          gh release view "$TAG" --json url,assets \
+            --jq '.url, (.assets[] | "  \(.name)  \(.size) bytes")'
+
+      - name: Archive the build tree (best-effort; artifact quota is shared)
+        if: always()
+        uses: actions/upload-artifact@v4
+        continue-on-error: true
+        with:
+          name: win32hle-ios-build
+          path: /home/jjr/pcrecomp/runtime/win32hle/ios/.build
+          retention-days: 30
