@@ -19,6 +19,7 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
+#include <sys/time.h>
 #include "win32hle.h"
 
 #define INVALID_HANDLE  0xFFFFFFFFu
@@ -293,6 +294,18 @@ static void k_GetFileTime(void) {                        /* (h, &create, &access
 }
 static void k_SetFileTime(void) {                        /* (h, &create, &access, &write) */
     int fd = fd_of(A32(0));
+#if defined(__APPLE__)
+    /* Darwin has no futimens() and no UTIME_OMIT: futimes() takes struct
+     * timeval, and a stamp of -1 (as UTIME_OMIT is there) means leave it be. */
+    struct timeval tv[2] = { { -1, 0 }, { -1, 0 } };
+    for (int i = 0; i < 2; i++) {
+        uint32_t at = A32(2 + i);
+        if (!at) continue;
+        uint64_t ft = get_ft(at);
+        tv[i].tv_sec = (time_t)(ft / 10000000ull - EPOCH_DIFF), tv[i].tv_usec = (int)((ft % 10000000ull) / 10);
+    }
+    RET(fd >= 0 && futimes(fd, tv) == 0 ? 1u : 0u, 4);
+#else
     struct timespec ts[2] = { { 0, UTIME_OMIT }, { 0, UTIME_OMIT } };
     for (int i = 0; i < 2; i++) {
         uint32_t at = A32(2 + i);
@@ -301,6 +314,7 @@ static void k_SetFileTime(void) {                        /* (h, &create, &access
         ts[i].tv_sec = (time_t)(ft / 10000000ull - EPOCH_DIFF), ts[i].tv_nsec = (long)(ft % 10000000ull) * 100;
     }
     RET(fd >= 0 && futimens(fd, ts) == 0 ? 1u : 0u, 4);
+#endif
 }
 
 static uint32_t attrs_of(const struct stat *st) {

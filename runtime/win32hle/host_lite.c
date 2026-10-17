@@ -21,6 +21,7 @@
 #include <pthread.h>
 #include <sched.h>
 #include "win32hle.h"
+#include "hle_tls.h"
 
 /* ------------------------------------------------------------ register file
  * recomp_types.h declares these extern; exactly one translation unit defines
@@ -112,7 +113,10 @@ static uint32_t make_tib(uint32_t lo, uint32_t hi) {
 }
 
 typedef struct { regs_t r; int depth, inited; } mstate;
-static __thread mstate g_ms;
+HLE_TLS_LOCAL(mstate, g_ms);
+#if defined(HLE_PTHREAD_TLS)
+#define g_ms (*(mstate *)hle_tls_slot(g_ms_slot, sizeof g_ms_anchor_))
+#endif
 
 void mach_enter(void) {
     if (g_ms.depth++ == 0) {
@@ -137,7 +141,10 @@ void mach_leave(void) {
 /* Give the machine up around a wait (a Sleep, an event, a contended critical
  * section). The registers go with it; nothing between begin and end may touch
  * the register file or guest-shared host state. */
-static __thread unsigned g_block_gen;
+HLE_TLS_LOCAL(unsigned, g_block_gen);
+#if defined(HLE_PTHREAD_TLS)
+#define g_block_gen (*(unsigned *)hle_tls_slot(g_block_gen_slot, sizeof g_block_gen_anchor_))
+#endif
 void hle_block_begin(void) {
     if (!g_ms.depth) return;
     regs_save(&g_ms.r);

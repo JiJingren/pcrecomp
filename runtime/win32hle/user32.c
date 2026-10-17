@@ -1931,6 +1931,11 @@ const hle_cursor_image_t *hle_cursor_image(uint32_t handle) {
     return NULL;
 }
 
+/* Where the guest's pointer is. A presenter that draws its own pointer - the
+ * iOS one does, there is no OS cursor on a touch screen - needs to put it there;
+ * screen.c gets this from SDL, so it is offered here the same way. */
+void hle_cursor_image_pos(int *x, int *y) { if (x) *x = g_cursor_x; if (y) *y = g_cursor_y; }
+
 static void u_LoadCursorA(void) {                        /* (hinst, name): an id, or a system cursor with hinst NULL */
     uint32_t hinst = A32(0), name = A32(1), h = 0;
     if (hinst && name < 0x10000u) h = load_mono_cursor(hinst, name);

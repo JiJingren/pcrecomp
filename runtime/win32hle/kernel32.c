@@ -20,6 +20,7 @@
 #include <sched.h>
 #include <sys/mman.h>
 #include "win32hle.h"
+#include "hle_tls.h"
 
 #define HEAP_ZERO_MEMORY            0x00000008u
 #define HEAP_REALLOC_IN_PLACE_ONLY  0x00000010u
@@ -34,7 +35,10 @@
 #define INFINITE          0xFFFFFFFFu
 
 /* --- error --- */
-static __thread uint32_t g_last_error;
+HLE_TLS_LOCAL(uint32_t, g_last_error);
+#if defined(HLE_PTHREAD_TLS)
+#define g_last_error (*(uint32_t *)hle_tls_slot(g_last_error_slot, sizeof g_last_error_anchor_))
+#endif
 void hle_set_last_error(uint32_t code) { g_last_error = code; }
 uint32_t hle_get_last_error(void) { return g_last_error; }
 static void k_GetLastError(void)      { RET(g_last_error, 0); }
@@ -97,7 +101,10 @@ static void k_FormatMessageA(void) {                     /* (flags, source, id, 
 static void k_GetExitCodeProcess(void) { if (A32(1)) MEM32(A32(1)) = 0; RET(1, 2); }
 
 /* Thread ids: small and stable per host thread (pthread_self is a pointer). */
-static __thread uint32_t g_tid;
+HLE_TLS_LOCAL(uint32_t, g_tid);
+#if defined(HLE_PTHREAD_TLS)
+#define g_tid (*(uint32_t *)hle_tls_slot(g_tid_slot, sizeof g_tid_anchor_))
+#endif
 static volatile uint32_t g_next_tid = 0x100;
 uint32_t hle_thread_id(void) {
     if (!g_tid) g_tid = __sync_add_and_fetch(&g_next_tid, 4);
@@ -463,7 +470,10 @@ static void k_WaitForMultipleObjects(void) {             /* (n, handles, all, ti
 
 /* --- thread-local storage: per host thread --- */
 #define TLS_SLOTS 64
-static __thread uint32_t g_tls[TLS_SLOTS];
+HLE_TLS_ARRAY(uint32_t, g_tls, TLS_SLOTS);
+#if defined(HLE_PTHREAD_TLS)
+#define g_tls (*(uint32_t (*)[TLS_SLOTS])hle_tls_slot(g_tls_slot, sizeof g_tls_anchor_))
+#endif
 static uint8_t g_tls_used[TLS_SLOTS];
 static void k_TlsAlloc(void) {
     for (int i = 0; i < TLS_SLOTS; i++) if (!g_tls_used[i]) { g_tls_used[i] = 1; RET((uint32_t)i, 0); }

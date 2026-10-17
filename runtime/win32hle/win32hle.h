@@ -116,6 +116,7 @@ extern void (*hle_cursor_hook)(int x, int y);                          /* the gu
 typedef struct { uint32_t handle; int hot_x, hot_y; uint8_t and_mask[128], xor_mask[128]; } hle_cursor_image_t;
 const hle_cursor_image_t *hle_cursor_image(uint32_t handle);   /* NULL: not one of those (show the system arrow) */
 uint32_t hle_current_cursor(void);                              /* the last SetCursor; 0 if none */
+void     hle_cursor_image_pos(int *x, int *y);                  /* GetCursorPos, for a presenter that draws its own */
 extern void (*hle_proc_hook)(uint32_t hwnd, uint32_t msg, uint32_t wParam, uint32_t lParam);   /* every message delivered */
 extern volatile int hle_lbutton_reads;   /* GetKeyState/GetAsyncKeyState(VK_LBUTTON) calls so far */
 int         hle_is_window(uint32_t h);

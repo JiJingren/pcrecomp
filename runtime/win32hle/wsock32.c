@@ -30,6 +30,7 @@
 #include <sys/socket.h>
 #include <sys/ioctl.h>
 #include "win32hle.h"
+#include "hle_tls.h"
 
 #define SOCK_BASE 0x1000u
 #define INVALID_SOCKET 0xFFFFFFFFu
@@ -44,7 +45,10 @@
 #define FD_READ  0x01u
 #define FD_WRITE 0x02u
 
-static __thread uint32_t g_wsa_error;
+HLE_TLS_LOCAL(uint32_t, g_wsa_error);
+#if defined(HLE_PTHREAD_TLS)
+#define g_wsa_error (*(uint32_t *)hle_tls_slot(g_wsa_error_slot, sizeof g_wsa_error_anchor_))
+#endif
 
 static uint32_t wsa_errno(int e) {
     switch (e) {
@@ -252,19 +256,30 @@ static void w_ntohl(void) { RET(ntohl(A32(0)), 1); }
 static void w_ntohs(void) { RET(ntohs((uint16_t)A32(0)), 1); }
 static void w_inet_addr(void) { RET(ASTR(0) ? inet_addr(ASTR(0)) : 0xFFFFFFFFu, 1); }
 static void w_inet_ntoa(void) {                          /* (in_addr by value) */
-    static __thread char buf[16];
+    HLE_TLS_ARRAY(char, buf, 16);
+#if defined(HLE_PTHREAD_TLS)
+#define buf (*(char (*)[16])hle_tls_slot(buf_slot, sizeof buf_anchor_))
+#endif
     uint32_t a = A32(0);
     snprintf(buf, sizeof buf, "%u.%u.%u.%u", a & 255, (a >> 8) & 255, (a >> 16) & 255, a >> 24);
     RETP(buf, 1);
 }
+#undef buf
 static void w_gethostname(void) {
     if (gethostname(ASTR(0), A32(1)) != 0) FAIL(2);
     RET(0, 2);
 }
 /* hostent, in guest-readable memory: name, aliases, addrtype(2), length(2),
  * addr_list. One per thread, as Winsock's is. */
+struct hle_hostent {
+    uint32_t name, aliases; uint16_t type, len; uint32_t list;
+    uint32_t lp[9]; uint32_t addr[8]; uint32_t none; char nm[256];
+};
 static void w_gethostbyname(void) {
-    static __thread struct { uint32_t name, aliases; uint16_t type, len; uint32_t list; uint32_t lp[9]; uint32_t addr[8]; uint32_t none; char nm[256]; } he;
+    HLE_TLS_LOCAL(struct hle_hostent, he);
+#if defined(HLE_PTHREAD_TLS)
+#define he (*(struct hle_hostent *)hle_tls_slot(he_slot, sizeof he_anchor_))
+#endif
     struct hostent *h = ASTR(0) ? gethostbyname(ASTR(0)) : NULL;
     if (!h || h->h_addrtype != AF_INET) { g_wsa_error = WSAHOST_NOT_FOUND; RET(0, 1); }
     memset(&he, 0, sizeof he);
@@ -279,6 +294,7 @@ static void w_gethostbyname(void) {
     }
     RETP(&he, 1);
 }
+#undef he
 
 /* ---- WSAAsyncSelect ---- */
 #define MAX_ASYNC 32
