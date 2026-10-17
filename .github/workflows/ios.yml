@@ -21,9 +21,9 @@ on:
         required: false
         default: '1'
       ffmpeg_tag:
-        description: FFmpeg release tag to take the archives from
+        description: 'release tag holding ffmpeg-ios-*-bink.tar.gz'
         required: false
-        default: ffmpeg-7.1-bink-ios
+        default: win32hle-ffmpeg-bink-ios
 
 jobs:
   ipa:
@@ -36,7 +36,7 @@ jobs:
     env:
       ARCHS: ${{ github.event.inputs.archs || 'armv7 armv7s' }}
       WITH_BINK: ${{ github.event.inputs.with_bink || '1' }}
-      FFMPEG_TAG: ${{ github.event.inputs.ffmpeg_tag || 'ffmpeg-7.1-bink-ios' }}
+      FFMPEG_TAG: ${{ github.event.inputs.ffmpeg_tag || 'win32hle-ffmpeg-bink-ios' }}
       WORKSPACE: /home/jjr/pcrecomp
 
     steps:
@@ -156,7 +156,10 @@ jobs:
           set -e
           mkdir -p "$WORKSPACE/.ffmpeg"
           cd "$WORKSPACE/.ffmpeg"
-          gh release download "$FFMPEG_TAG" --repo JiJingren/ffmpeg-ios
+          # from this repo, not ffmpeg-ios: that one is private and this
+          # job's GITHUB_TOKEN cannot read across repositories
+          gh release download "$FFMPEG_TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern 'ffmpeg-ios-*-bink.tar.gz'
           tar xzf *.tar.gz
           d="$(ls -d ffmpeg-ios-*/ | head -1)"
           ( cd "$d" && sha256sum -c SHA256SUMS.txt )
