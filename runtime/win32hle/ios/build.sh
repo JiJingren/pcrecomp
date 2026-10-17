@@ -161,10 +161,16 @@ for arch in $ARCHS; do
       "${INCS[@]}" "${OBJCOMMON[@]}" -c "$HLE/$s" -o "$o"
   done
 
+  # UIKit declared -supportedInterfaceOrientations as returning NSUInteger in
+  # the 2012 SDK and as UIInterfaceOrientationMask from 10.3 on. Same bits, so
+  # implement the modern spelling and quiet only that warning for this one file.
   for s in "${IOS_M[@]}"; do
     o="$objdir/$(basename "$s" .m).o"
+    extra=()
+    [ "$(basename "$s")" = HLEViewController.m ] && extra=(-Wno-mismatched-return-types)
     "$CC_BIN" "${common[@]}" "${OBJCFLAGS[@]}" \
-      -I"$HERE" "${INCS[@]}" "${OBJCOMMON[@]}" -c "$HERE/$(basename "$s")" -o "$o"
+      -I"$HERE" "${INCS[@]}" "${OBJCOMMON[@]}" "${extra[@]}" \
+      -c "$HERE/$(basename "$s")" -o "$o"
   done
 
   link_ffmpeg=()
