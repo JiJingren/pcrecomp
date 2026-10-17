@@ -348,8 +348,14 @@ void hle_screen_pump(void) {
         case HLE_IOS_MOUSE_UP:   hle_input_mouse(WM_LBUTTONUP, gx, gy); break;
         case HLE_IOS_MOUSE_RDOWN: hle_input_mouse(WM_RBUTTONDOWN, gx, gy); break;
         case HLE_IOS_MOUSE_RUP:   hle_input_mouse(WM_RBUTTONUP, gx, gy); break;
-        case HLE_IOS_KEY_DOWN:   hle_input_key(1, (uint32_t)e.vk, (uint32_t)e.scan); break;
-        case HLE_IOS_KEY_UP:     hle_input_key(0, (uint32_t)e.vk, (uint32_t)e.scan); break;
+        /* The key hook is fed the virtual key, not an SDL scancode: there is
+         * no SDL here, and SDL_SCANCODE_F9 never meant anything to it. */
+        case HLE_IOS_KEY_DOWN:   hle_input_key(1, (uint32_t)e.vk, (uint32_t)e.scan);
+                                 if (hle_screen_key_hook) hle_screen_key_hook((int)e.vk, 1);
+                                 break;
+        case HLE_IOS_KEY_UP:     hle_input_key(0, (uint32_t)e.vk, (uint32_t)e.scan);
+                                 if (hle_screen_key_hook) hle_screen_key_hook((int)e.vk, 0);
+                                 break;
         default: break;
         }
     }
